@@ -146,12 +146,15 @@ if st.button("Generate optimized 10 entries"):
     # THIS LINE MUST EXIST
     result = optimize_portfolio_10(
         pool=pool,
+        win_odds_df=win_odds,
         n_candidates=int(n_candidates),
-        shortlist_size=int(shortlist_size),
+        k_shortlist=200,
+        n_sims=5000,
         k_dup=float(k_dup),
         overlap_lambda=float(overlap_lambda),
         rng_seed=1,
         min_wc_players=4,
+        min_stack=3,
         bye_teams=bye_teams,
     )
 
@@ -314,6 +317,7 @@ with st.expander("📊 Full Draft Board"):
         height=500,
         use_container_width=True,
     )
+
 
 
 
