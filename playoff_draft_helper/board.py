@@ -38,7 +38,7 @@ def compute_board(
     lock_nfc = lock_override_nfc if lock_override_nfc else auto_locks["NFC"]
     lock_afc = lock_override_afc if lock_override_afc else auto_locks["AFC"]
 
-    def eff_games(team: str) -> float:
+def eff_games(team: str) -> float:
     conf = conference_of(team)
 
     # ---------- NFC ----------
@@ -46,20 +46,24 @@ def compute_board(
         # LOCKED
         if lock_nfc:
             if team == lock_nfc:
-                return float(exp_if_not_champ_nfc.get(team))
-            return float(cond_by_champ_nfc.get(lock_nfc, {}).get(team))
+                # Expected games if the locked team does NOT win conference
+                return float(exp_if_not_champ_nfc.get(team, np.nan))
+            # Expected games for other teams given locked champ
+            return float(cond_by_champ_nfc.get(lock_nfc, {}).get(team, np.nan))
 
-        # NOT LOCKED YET → CONDITIONAL ON TEAM WINNING
-        return float(cond_by_champ_nfc.get(team, {}).get(team))
+        # NOT LOCKED YET → conditional on team winning conference
+        return float(cond_by_champ_nfc.get(team, {}).get(team, np.nan))
 
     # ---------- AFC ----------
     if conf == "AFC":
         if lock_afc:
             if team == lock_afc:
-                return float(exp_if_not_champ_afc.get(team))
-            return float(cond_by_champ_afc.get(lock_afc, {}).get(team))
+                return float(exp_if_not_champ_afc.get(team, np.nan))
+            return float(cond_by_champ_afc.get(lock_afc, {}).get(team, np.nan))
 
-        return float(cond_by_champ_afc.get(team, {}).get(team))
+        return float(cond_by_champ_afc.get(team, {}).get(team, np.nan))
+
+    return np.nan
 
     out = players_df.copy()
     out["Conference"] = out["Team"].apply(conference_of)
