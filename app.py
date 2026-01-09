@@ -1,5 +1,6 @@
 import streamlit as st
 import pandas as pd
+import numpy as np
 
 from playoff_draft_helper.data import load_data
 from playoff_draft_helper.sim import build_round_probs
@@ -143,7 +144,25 @@ if st.button("Generate optimized 10 entries"):
         bye_teams=bye_teams,
     )
 
-    # THIS LINE MUST EXIST
+    # ==========================================
+    # ⚡ DEBUG: FAST UNCONSTRAINED LINEUPS
+    # ==========================================
+    if st.checkbox("⚡ DEBUG: Generate unconstrained lineups (fast)"):
+        rng = np.random.default_rng(1)
+        players_list = pool["Player"].tolist()
+
+        st.subheader("⚡ DEBUG Lineups (No Constraints, No Simulation)")
+
+        for i in range(10):
+            lineup = rng.choice(players_list, size=6, replace=False).tolist()
+            st.markdown(f"### Debug Lineup {i+1}")
+            st.write(lineup)
+
+        st.stop()
+
+    # ==========================================
+    # REAL OPTIMIZER (HEAVY)
+    # ==========================================
     result = optimize_portfolio_10(
         pool=pool,
         win_odds_df=win_odds,
@@ -157,6 +176,7 @@ if st.button("Generate optimized 10 entries"):
         min_stack=3,
         bye_teams=bye_teams,
     )
+
 
     st.subheader("DEBUG: Rams caps in selected portfolio")
     summary = result["portfolio_summary"].copy()
@@ -317,6 +337,7 @@ with st.expander("📊 Full Draft Board"):
         height=500,
         use_container_width=True,
     )
+
 
 
 
