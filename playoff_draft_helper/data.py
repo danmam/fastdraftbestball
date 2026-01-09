@@ -31,12 +31,13 @@ def load_data(players_csv, win_odds_csv, adp_csv):
 
     win_odds["Team"] = win_odds["Team"].astype(str).str.strip()
 
-    for col in PCT_COLS:
+    for col in ODDS_COLS:
         win_odds[col] = _pct_to_decimal(win_odds[col])
 
     win_odds["Has_WC_Game"] = ~win_odds["Pick to Win Popularity (Wild Card)"].isna()
     win_odds["Max_Games"] = np.where(win_odds["Has_WC_Game"], 4.0, 3.0)
 
     return players, win_odds, adp
+
 
 
