@@ -20,13 +20,17 @@ def compute_board(
     cond_by_champ_afc: dict,
     exp_if_not_champ_afc: dict,
     drafted_players_in_order: list,
+    drafted_by_others: list,
+    current_pick: int,
+    next_pick: int,
     lock_override_nfc: str | None = None,
     lock_override_afc: str | None = None,
 ):
     """
     Returns:
-        board_df : DataFrame sorted by DraftPool_EffectiveCeiling
-        meta     : dict describing auto-locks and active locks
+        board_df          : full board with EV + urgency metrics
+        recommendations   : top-10 next picks
+        meta              : lock metadata
     """
 
     # -----------------------------
@@ -34,6 +38,9 @@ def compute_board(
     # -----------------------------
     win_by_team = win_odds_df.set_index("Team")
     player_to_team = dict(zip(players_df["Player"], players_df["Team"]))
+
+    drafted_set = set(drafted_players_in_order)
+    drafted_others_set = set(drafted_by_others)
 
     # -----------------------------
     # Auto-locks (first drafted team per conference)
@@ -57,7 +64,6 @@ def compute_board(
     def eff_games(team: str) -> float:
         conf = conference_of(team)
 
-        # ---------- NFC ----------
         if conf == "NFC":
             if lock_nfc:
                 if team == lock_nfc:
@@ -65,7 +71,6 @@ def compute_board(
                 return cond_by_champ_nfc.get(lock_nfc, {}).get(team, np.nan)
             return cond_by_champ_nfc.get(team, {}).get(team, np.nan)
 
-        # ---------- AFC ----------
         if conf == "AFC":
             if lock_afc:
                 if team == lock_afc:
@@ -116,10 +121,11 @@ def compute_board(
     out["DraftPool_EffectiveCeiling"] = out.apply(draft_pool_ceiling, axis=1)
 
     # -----------------------------
-    # Boosters
+    # Availability flags
     # -----------------------------
-    for mult in BOOSTERS:
-        out[f"Booster_{mult}x"] = out["DraftPool_EffectiveCeiling"] * mult
+    out["DraftedByYou"] = out["Player"].isin(drafted_set)
+    out["DraftedByOthers"] = out["Player"].isin(drafted_others_set)
+    out["Available"] = ~(out["DraftedByYou"] | out["DraftedByOthers"])
 
     # -----------------------------
     # ADP merge
@@ -135,14 +141,47 @@ def compute_board(
     else:
         out["ADP_Rank"] = np.nan
 
-    out["CeilingRank"] = out["DraftPool_EffectiveCeiling"].rank(
-        ascending=False,
-        method="min",
+    # =============================
+    # VALUE OVER REPLACEMENT
+    # =============================
+    replacement_ceiling = (
+        out.loc[out["Available"], "DraftPool_EffectiveCeiling"]
+        .quantile(0.75)
     )
 
-    out["Value_Gap"] = out["ADP_Rank"] - out["CeilingRank"]
+    out["VOR"] = out["DraftPool_EffectiveCeiling"] - replacement_ceiling
 
-    out["IsDrafted"] = out["Player"].isin(set(drafted_players_in_order))
+    # =============================
+    # URGENCY MODEL (ADP)
+    # =============================
+    def gone_probability(adp_rank):
+        if pd.isna(adp_rank):
+            return 0.0
+        return 1 / (1 + np.exp(-(next_pick - adp_rank) / 2.5))
+
+    out["GoneProb"] = out["ADP_Rank"].apply(gone_probability)
+
+    # =============================
+    # DRAFT PRIORITY
+    # =============================
+    out["DraftPriority"] = out["VOR"] * (0.6 + 0.4 * out["GoneProb"])
+
+    out["MustHave"] = (out["VOR"] > 0) & (out["GoneProb"] > 0.70)
+
+    # -----------------------------
+    # Boosters
+    # -----------------------------
+    for mult in BOOSTERS:
+        out[f"Booster_{mult}x"] = out["DraftPool_EffectiveCeiling"] * mult
+
+    # =============================
+    # RECOMMENDATIONS
+    # =============================
+    recommendations = (
+        out.loc[out["Available"]]
+        .sort_values("DraftPriority", ascending=False)
+        .head(10)
+    )
 
     # -----------------------------
     # Meta info
@@ -152,12 +191,11 @@ def compute_board(
         "AutoLock_AFC": auto_lock["AFC"],
         "UsingLock_NFC": lock_nfc,
         "UsingLock_AFC": lock_afc,
+        "ReplacementCeiling": replacement_ceiling,
     }
 
-    # -----------------------------
-    # FINAL RETURN (ALWAYS)
-    # -----------------------------
-    return out.sort_values(
-        "DraftPool_EffectiveCeiling",
-        ascending=False,
-    ), meta
+    return (
+        out.sort_values("DraftPool_EffectiveCeiling", ascending=False),
+        recommendations,
+        meta,
+    )
