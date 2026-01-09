@@ -580,7 +580,7 @@ def optimize_portfolio_10(
                 "Players": ", ".join(lineup_players),
             }
         )
-
+    st.write(result["portfolio_summary"].columns.tolist())
     portfolio_summary = pd.DataFrame(portfolio_summary_rows)
 
     # -----------------------------
