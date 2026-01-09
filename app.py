@@ -197,7 +197,7 @@ if st.button("Generate optimized 10 entries"):
     st.dataframe(team_counts.head(10), use_container_width=True)
 
     st.session_state["portfolio_result"] = result
-    st.rerun()
+    #st.rerun()
 
 
 # --------------------------------------------------
@@ -313,6 +313,7 @@ with st.expander("📊 Full Draft Board"):
         height=500,
         use_container_width=True,
     )
+
 
 
 
