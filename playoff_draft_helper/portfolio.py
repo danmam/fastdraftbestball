@@ -607,13 +607,13 @@ def optimize_portfolio_10(
     )
     exp_teams["Exposure"] = exp_teams["Count"] / (10.0 * 6.0)
 
-return {
-    "portfolio_lineups": portfolio_lineups,
-    "portfolio_summary": portfolio_summary,
-    "exposure_players": exp_players,
-    "exposure_teams": exp_teams,
-    "candidates_scored": shortlist,
-}
+    return {
+        "portfolio_lineups": portfolio_lineups,
+        "portfolio_summary": portfolio_summary,
+        "exposure_players": exp_players,
+        "exposure_teams": exp_teams,
+        "candidates_scored": shortlist,
+    }
 
         "exposure_players": exp_players,
         "exposure_teams": exp_teams,
