@@ -119,12 +119,12 @@ with right:
         with c1:
             if st.button(f"Draft Me", key=f"me_{row['Player']}"):
                 st.session_state.drafted_by_you.append(row["Player"])
-                st.experimental_rerun()
+                st.rerun()
 
         with c2:
             if st.button(f"Drafted by Other", key=f"other_{row['Player']}"):
                 st.session_state.drafted_by_others.append(row["Player"])
-                st.experimental_rerun()
+                st.rerun()
 
 # --------------------------------------------------
 # OPTIONAL: Full board (collapsed)
@@ -147,3 +147,4 @@ with st.expander("📊 Full Draft Board"):
         height=500,
         use_container_width=True,
     )
+
