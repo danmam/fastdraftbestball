@@ -3,7 +3,6 @@ import pandas as pd
 import numpy as np
 
 ODDS_COLS = [
-    "Pick to Win Popularity (Wild Card)",
     "P_make_div",
     "P_make_conf",
     "P_make_sb",
@@ -31,13 +30,18 @@ def load_data(players_csv, win_odds_csv, adp_csv):
 
     win_odds["Team"] = win_odds["Team"].astype(str).str.strip()
 
+    # Validate + convert odds columns
     for col in ODDS_COLS:
+        if col not in win_odds.columns:
+            raise ValueError(f"Missing required column: {col}")
         win_odds[col] = _pct_to_decimal(win_odds[col])
 
-    win_odds["Has_WC_Game"] = ~win_odds["Pick to Win Popularity (Wild Card)"].isna()
+    # Wild Card metadata (still allowed)
+    if "Pick to Win Popularity (Wild Card)" in win_odds.columns:
+        win_odds["Has_WC_Game"] = ~win_odds["Pick to Win Popularity (Wild Card)"].isna()
+    else:
+        win_odds["Has_WC_Game"] = True
+
     win_odds["Max_Games"] = np.where(win_odds["Has_WC_Game"], 4.0, 3.0)
 
     return players, win_odds, adp
-
-
-
