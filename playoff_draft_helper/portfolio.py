@@ -404,60 +404,55 @@ def optimize_portfolio_10(
     rng_seed: int = 1,
     min_wc_players: int = 4,
     bye_teams: set[str] | None = None,
-    team_exposure_lambda: float = 0.0,
-    max_team_lineups: int | None = None,
+    rams_team: str = "LAR",
+    rams_heavy_threshold: int = 3,
+    max_rams_heavy_portfolio: int = 3,
+    max_rams_any_portfolio: int = 5,
 ) -> dict:
     """
-    Two-step:
-      1) generate + fast score candidate lineups
-      2) greedy select 10 with overlap penalty + optional portfolio-level team exposure control
-
-    Args:
-      team_exposure_lambda:
-        **Portfolio-level** penalty applied during selection:
-        penalizes lineups whose teams are already overrepresented in the selected set.
-        Set >0 to diversify by team without penalizing 4-2 / 5-1 structures.
-      max_team_lineups:
-        Optional hard cap: maximum number of selected lineups that may include a given team.
-        (Counts a team once per lineup if the lineup contains at least one player from that team.)
-    Returns:
-      - portfolio_lineups: list of 10 lineups, each lineup is a df with boosters
-      - portfolio_summary: df (lineup-level scores)
-      - exposure_players: df
-      - exposure_teams: df
-      - candidates_scored: df (shortlist)
-      - selection_meta: dict (team exposure used)
+    Portfolio optimizer with HARD Rams exposure caps:
+      - max 3 lineups with >=3 Rams
+      - max 5 lineups with any Rams
     """
+
     if bye_teams is None:
         bye_teams = {"SEA", "DEN"}
 
-    # Ensure uniqueness so idx.loc[lineup] always returns exactly 6 rows
+    rng = np.random.default_rng(rng_seed)
+
+    # Ensure unique players
     pool = (
         pool.sort_values("FastPlayerValue", ascending=False)
         .drop_duplicates(subset=["Player"], keep="first")
         .copy()
     )
 
-    rng = np.random.default_rng(rng_seed)
+    idx = pool.set_index("Player")
 
+    # -----------------------------
+    # Generate candidates
+    # -----------------------------
     candidates = generate_candidate_lineups(
         pool=pool,
         n_candidates=n_candidates,
         rng=rng,
         min_wc_players=min_wc_players,
     )
-    if not candidates:
-        raise ValueError("No candidates generated. Loosen constraints or verify player pool/team probs.")
 
-    idx = pool.set_index("Player")
+    if not candidates:
+        raise ValueError("No candidates generated.")
 
     # -----------------------------
-    # Score candidates (fast proxy)
+    # Score candidates
     # -----------------------------
     scored_rows = []
+
     for lineup in candidates:
         lineup_df = idx.loc[lineup].reset_index()
         s = score_lineup_fast(lineup_df, k_dup=k_dup)
+
+        num_rams = int((lineup_df["Team"] == rams_team).sum())
+
         scored_rows.append(
             {
                 "Players": tuple(lineup),
@@ -467,83 +462,77 @@ def optimize_portfolio_10(
                 "DupPressure": float(s["DupPressure"]),
                 "NumWildCard": int(s["NumWildCard"]),
                 "NumTeams": int(s["NumTeams"]),
+                "NumRams": num_rams,
+                "HasAnyRams": num_rams > 0,
+                "IsRamsHeavy": num_rams >= rams_heavy_threshold,
             }
         )
 
-    scored = pd.DataFrame(scored_rows).sort_values("EWFast", ascending=False).reset_index(drop=True)
-    shortlist = scored.head(int(shortlist_size)).copy()
+    scored = (
+        pd.DataFrame(scored_rows)
+        .sort_values("EWFast", ascending=False)
+        .reset_index(drop=True)
+    )
+
+    shortlist = scored.head(shortlist_size).copy()
 
     # -----------------------------
     # Greedy portfolio selection
     # -----------------------------
-    from collections import Counter
+    selected = []
+    selected_sets = []
 
-    selected: list[tuple[float, pd.Series]] = []
-    selected_sets: list[set[str]] = []
-    team_exposure = Counter()  # counts: team -> number of selected lineups that include this team
+    rams_any_selected = 0
+    rams_heavy_selected = 0
 
-    def overlap_penalty(lineup_players_set: set[str]) -> float:
-        if not selected_sets:
-            return 0.0
-        return float(sum(len(lineup_players_set & s) for s in selected_sets))
+    def overlap_penalty(players_set: set[str]) -> float:
+        return sum(len(players_set & s) for s in selected_sets)
 
-    def lineup_teams(players_tuple: tuple[str, ...]) -> set[str]:
-        # idx has Team column
-        df = idx.loc[list(players_tuple)]
-        return set(df["Team"].astype(str).tolist())
+    def try_select(row) -> bool:
+        nonlocal rams_any_selected, rams_heavy_selected
 
-    def team_exposure_penalty(teams_set: set[str]) -> float:
-        # Penalize by how many times each team has already appeared in the portfolio
-        # (Counts each team once per lineup.)
-        return float(sum(team_exposure[t] for t in teams_set))
-
-    def violates_team_cap(teams_set: set[str]) -> bool:
-        if max_team_lineups is None:
+        if row["HasAnyRams"] and rams_any_selected >= max_rams_any_portfolio:
             return False
-        return any(team_exposure[t] >= int(max_team_lineups) for t in teams_set)
+        if row["IsRamsHeavy"] and rams_heavy_selected >= max_rams_heavy_portfolio:
+            return False
 
-    def try_select_from(df: pd.DataFrame) -> None:
-        nonlocal selected, selected_sets, team_exposure
-        for _, row in df.iterrows():
+        players = list(row["Players"])
+        players_set = set(players)
+
+        obj = float(row["EWFast"]) - overlap_lambda * overlap_penalty(players_set)
+
+        selected.append((obj, row))
+        selected_sets.append(players_set)
+
+        if row["HasAnyRams"]:
+            rams_any_selected += 1
+        if row["IsRamsHeavy"]:
+            rams_heavy_selected += 1
+
+        return True
+
+    # Primary pass
+    for _, row in shortlist.iterrows():
+        if len(selected) >= 10:
+            break
+        try_select(row)
+
+    # Backfill if needed
+    if len(selected) < 10:
+        for _, row in scored.iloc[shortlist_size:].iterrows():
             if len(selected) >= 10:
                 break
+            try_select(row)
 
-            players = row["Players"]
-            players_set = set(players)
-            teams_set = lineup_teams(players)
-
-            if violates_team_cap(teams_set):
-                continue
-
-            ov_pen = overlap_penalty(players_set)
-            tm_pen = team_exposure_penalty(teams_set) if team_exposure_lambda and team_exposure_lambda > 0 else 0.0
-
-            obj = float(row["EWFast"]) - float(overlap_lambda) * ov_pen - float(team_exposure_lambda) * tm_pen
-
-            selected.append((obj, row))
-            selected_sets.append(players_set)
-
-            # update exposures AFTER selection
-            for t in teams_set:
-                team_exposure[t] += 1
-
-    # Primary pass: shortlist
-    try_select_from(shortlist)
-
-    # Backfill if needed: remaining scored rows
-    if len(selected) < 10:
-        try_select_from(scored.iloc[int(shortlist_size):])
-
-    # Keep best 10 by objective (stable even if we over-collected)
     selected_rows = [r for _, r in sorted(selected, key=lambda x: x[0], reverse=True)[:10]]
 
     # -----------------------------
-    # Build final lineup dfs with boosters
+    # Build final lineups
     # -----------------------------
     portfolio_lineups = []
     portfolio_summary_rows = []
 
-    for j, r in enumerate(selected_rows, start=1):
+    for i, r in enumerate(selected_rows, start=1):
         lineup_players = list(r["Players"])
         lineup_df = idx.loc[lineup_players].reset_index()
         lineup_df = assign_boosters_greedy_bestball(lineup_df)
@@ -555,25 +544,26 @@ def optimize_portfolio_10(
 
         portfolio_summary_rows.append(
             {
-                "Entry": j,
-                "Objective": float(r.get("EWFast", 0.0)),  # keep EWFast visible; objective depends on penalties
-                "EWFast": float(r["EWFast"]),
-                "ScoreFast": float(r["ScoreFast"]),
-                "SplitFactor": float(r["SplitFactor"]),
-                "DupPressure": float(r["DupPressure"]),
-                "NumWildCard": int(r["NumWildCard"]),
-                "NumTeams": int(r["NumTeams"]),
+                "Entry": i,
+                "EWFast": r["EWFast"],
+                "ScoreFast": r["ScoreFast"],
+                "SplitFactor": r["SplitFactor"],
+                "DupPressure": r["DupPressure"],
+                "NumWildCard": r["NumWildCard"],
+                "NumTeams": r["NumTeams"],
+                "NumRams": r["NumRams"],
+                "IsRamsHeavy": r["IsRamsHeavy"],
                 "Top4BoostedSum": float(top4["BoostedValue"].sum()),
                 "Players": ", ".join(lineup_players),
             }
         )
 
-    portfolio_summary = pd.DataFrame(portfolio_summary_rows).sort_values("EWFast", ascending=False)
+    portfolio_summary = pd.DataFrame(portfolio_summary_rows)
 
     # -----------------------------
     # Exposures
     # -----------------------------
-    all_players = list(itertools.chain.from_iterable([df["Player"].tolist() for df in portfolio_lineups]))
+    all_players = list(itertools.chain.from_iterable(df["Player"] for df in portfolio_lineups))
     exp_players = (
         pd.Series(all_players)
         .value_counts()
@@ -581,9 +571,11 @@ def optimize_portfolio_10(
         .reset_index(name="Count")
     )
     exp_players["Exposure"] = exp_players["Count"] / 10.0
-    exp_players = exp_players.merge(pool[["Player", "Team", "OwnershipFrac"]], on="Player", how="left")
+    exp_players = exp_players.merge(
+        pool[["Player", "Team", "OwnershipFrac"]], on="Player", how="left"
+    )
 
-    all_teams = list(itertools.chain.from_iterable([df["Team"].tolist() for df in portfolio_lineups]))
+    all_teams = list(itertools.chain.from_iterable(df["Team"] for df in portfolio_lineups))
     exp_teams = (
         pd.Series(all_teams)
         .value_counts()
@@ -598,9 +590,9 @@ def optimize_portfolio_10(
         "exposure_players": exp_players,
         "exposure_teams": exp_teams,
         "candidates_scored": shortlist,
-        "selection_meta": {
-            "team_exposure_lambda": float(team_exposure_lambda),
-            "max_team_lineups": None if max_team_lineups is None else int(max_team_lineups),
-            "team_exposure_lineups": dict(team_exposure),
-        },
+    }
+
+        "exposure_players": exp_players,
+        "exposure_teams": exp_teams,
+        "candidates_scored": shortlist,
     }
