@@ -5,6 +5,7 @@ from playoff_draft_helper.data import load_data
 from playoff_draft_helper.sim import build_round_probs, simulate_conditionals
 from playoff_draft_helper.board import compute_board
 from playoff_draft_helper.bracket import NFC_TEAMS, AFC_TEAMS
+from playoff_draft_helper.portfolio import build_team_round_probs, build_player_pool, optimize_portfolio_10
 
 # --------------------------------------------------
 # Page setup
@@ -103,6 +104,72 @@ board, recommendations, meta = compute_board(
     lock_override_nfc=lock_nfc_val,
     lock_override_afc=lock_afc_val,
 )
+
+st.subheader("🎯 Portfolio Optimizer (10 Entries)")
+
+colA, colB, colC, colD = st.columns(4)
+
+with colA:
+    n_candidates = st.number_input("Candidates", min_value=2000, max_value=100000, value=20000, step=2000)
+
+with colB:
+    shortlist_size = st.number_input("Shortlist", min_value=50, max_value=2000, value=400, step=50)
+
+with colC:
+    k_dup = st.number_input("Dup penalty k", min_value=0.0, max_value=3000.0, value=900.0, step=50.0)
+
+with colD:
+    overlap_lambda = st.number_input("Overlap λ", min_value=0.0, max_value=2.0, value=0.35, step=0.05)
+
+bye_teams = {"SEA", "DEN"}
+
+if st.button("Generate optimized 10 entries"):
+    team_probs = build_team_round_probs(win_odds, bye_teams=bye_teams)
+
+    # Use your existing 'board' if it contains TEFP / ceilings; otherwise use players directly.
+    base_df = board if "TEFP" in board.columns else players
+
+    pool = build_player_pool(
+        players_df=base_df,
+        adp_df=adp,
+        team_round_probs=team_probs,
+        bye_teams=bye_teams,
+    )
+
+    result = optimize_portfolio_10(
+        pool=pool,
+        n_candidates=int(n_candidates),
+        shortlist_size=int(shortlist_size),
+        k_dup=float(k_dup),
+        overlap_lambda=float(overlap_lambda),
+        rng_seed=1,
+        min_wc_players=4,
+        bye_teams=bye_teams,
+    )
+
+    st.session_state["portfolio_result"] = result
+    st.rerun()
+
+if "portfolio_result" in st.session_state:
+    result = st.session_state["portfolio_result"]
+
+    st.markdown("### Portfolio summary")
+    st.dataframe(result["portfolio_summary"], use_container_width=True, height=260)
+
+    st.markdown("### Player exposures (10 entries)")
+    st.dataframe(result["exposure_players"], use_container_width=True, height=260)
+
+    st.markdown("### Team exposures (share of 60 total roster slots)")
+    st.dataframe(result["exposure_teams"], use_container_width=True, height=220)
+
+    st.markdown("### Entries")
+    for i, df in enumerate(result["portfolio_lineups"], start=1):
+        with st.expander(f"Entry {i}", expanded=False):
+            st.dataframe(
+                df[["Player", "Team", "OwnershipFrac", "FastPlayerValue", "Booster", "BoostedValue"]],
+                use_container_width=True,
+                height=240,
+            )
 
 # --------------------------------------------------
 # MAIN PANEL: Recommendations + Actions
@@ -230,6 +297,7 @@ with st.expander("📊 Full Draft Board"):
         height=500,
         use_container_width=True,
     )
+
 
 
 
