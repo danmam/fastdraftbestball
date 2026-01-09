@@ -156,15 +156,16 @@ if st.button("Generate optimized 10 entries"):
         bye_teams=bye_teams,
     )
 
+    # THIS LINE MUST EXIST
     result = optimize_portfolio_10(
-    pool=pool,
-    n_candidates=int(n_candidates),
-    shortlist_size=int(shortlist_size),
-    k_dup=float(k_dup),
-    overlap_lambda=float(overlap_lambda),
-    rng_seed=1,
-    min_wc_players=4,
-    bye_teams=bye_teams,
+        pool=pool,
+        n_candidates=int(n_candidates),
+        shortlist_size=int(shortlist_size),
+        k_dup=float(k_dup),
+        overlap_lambda=float(overlap_lambda),
+        rng_seed=1,
+        min_wc_players=4,
+        bye_teams=bye_teams,
     )
 
     # =============================
@@ -182,7 +183,6 @@ if st.button("Generate optimized 10 entries"):
     st.subheader("📉 EWFast decay (Top 200)")
     st.line_chart(screened["EWFast"].head(200))
 
-    # Team frequency in screened set
     teams = (
         screened["Players"]
         .apply(lambda ps: pd.Series(ps))
@@ -196,9 +196,9 @@ if st.button("Generate optimized 10 entries"):
     st.subheader("🏈 Team frequency in screened set")
     st.dataframe(team_counts.head(10), use_container_width=True)
 
-    
     st.session_state["portfolio_result"] = result
     st.rerun()
+
 
 # --------------------------------------------------
 # Results
@@ -313,6 +313,7 @@ with st.expander("📊 Full Draft Board"):
         height=500,
         use_container_width=True,
     )
+
 
 
 
