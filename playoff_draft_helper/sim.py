@@ -1,3 +1,5 @@
+print("LOADED sim.py WITH simulate_lineup_many")
+
 # playoff_draft_helper/sim.py
 from __future__ import annotations
 from dataclasses import dataclass
@@ -151,4 +153,5 @@ def simulate_lineup_many(
         "q90": float(np.quantile(totals, 0.90)) if n_sims else 0.0,
         "q95": float(np.quantile(totals, 0.95)) if n_sims else 0.0,
     }
+
 
