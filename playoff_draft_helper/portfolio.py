@@ -63,7 +63,15 @@ def build_team_round_probs(win_odds_df: pd.DataFrame, bye_teams: set[str]) -> pd
 
     # If your file only has win-by-round, you can extend this later.
     # For now, we require these to exist to avoid silently using P(win SB).
-    missing = [name for name, col in [("P_make_div", col_div), ("P_make_conf", col_conf), ("P_make_sb", col_sb)] if col is None]
+    missing = [
+        name
+        for name, col in [
+            ("P_make_div", col_div),
+            ("P_make_conf", col_conf),
+            ("P_make_sb", col_sb),
+        ]
+        if col is None
+    ]
     if missing:
         raise ValueError(
             "win_odds_df is missing required team reach-probability columns: "
@@ -160,6 +168,10 @@ def build_player_pool(
     # Tail-weighted per-player value (fast)
     pool["FastPlayerValue"] = 0.75 * pool["CeilingProxy"] + 0.25 * pool["FastExpectedTotal"]
 
+    # Critical invariant for downstream selection/indexing:
+    # We must have a single row per Player to avoid ambiguous .loc returning a Series.
+    pool = pool.sort_values("FastPlayerValue", ascending=False).drop_duplicates(subset=["Player"], keep="first")
+
     return pool
 
 
@@ -241,6 +253,9 @@ def generate_candidate_lineups(
     if "P_make_sb" not in pool.columns:
         raise ValueError("pool must contain P_make_sb (via team_round_probs merge).")
 
+    # Ensure uniqueness so idx.loc[lineup] always returns exactly 6 rows
+    pool = pool.sort_values("FastPlayerValue", ascending=False).drop_duplicates(subset=["Player"], keep="first").copy()
+
     # candidate primary teams = top by P_make_sb
     team_sb = (
         pool.groupby("Team")["P_make_sb"]
@@ -262,6 +277,9 @@ def generate_candidate_lineups(
     by_team = {t: pool.loc[pool["Team"] == t].copy() for t in pool["Team"].unique()}
     wc_pool = pool.loc[pool["IsWildCardTeam"]].copy()
     bye_pool = pool.loc[~pool["IsWildCardTeam"]].copy()
+
+    # fast lookup: player -> is wildcard flag (scalar)
+    is_wc = pool.set_index("Player")["IsWildCardTeam"]
 
     def sample_players_from_team(team: str, k: int) -> list[str]:
         df = by_team.get(team)
@@ -328,15 +346,13 @@ def generate_candidate_lineups(
             continue
 
         # Enforce min WC players
-        num_wc = int(pool.set_index("Player").loc[lineup_players, "IsWildCardTeam"].sum())
+        num_wc = int(is_wc.loc[lineup_players].sum())
         if num_wc < min_wc_players:
             # Try to swap in WC satellites if possible
             # Simple repair: replace random bye-team player(s) with WC players
             lineup_set = set(lineup_players)
-            bye_players = [
-                p for p in lineup_players
-                if not bool(pool.set_index("Player").loc[p, "IsWildCardTeam"])
-            ]
+            bye_players = [p for p in lineup_players if not bool(is_wc.loc[p])]
+
             if not bye_players:
                 continue
 
@@ -347,11 +363,12 @@ def generate_candidate_lineups(
                     repair_ok = False
                     break
                 out_p = bye_players.pop()
-                # pick a WC player not already used
+
                 df_wc = wc_pool.loc[~wc_pool["Player"].isin(lineup_set)]
                 if df_wc.empty:
                     repair_ok = False
                     break
+
                 w = df_wc["FastPlayerValue"].clip(lower=0.0).values
                 if w.sum() <= 0:
                     w = np.ones(len(df_wc))
@@ -366,7 +383,7 @@ def generate_candidate_lineups(
             if not repair_ok:
                 continue
 
-            num_wc = int(pool.set_index("Player").loc[lineup_players, "IsWildCardTeam"].sum())
+            num_wc = int(is_wc.loc[lineup_players].sum())
             if num_wc < min_wc_players:
                 continue
 
@@ -398,6 +415,9 @@ def optimize_portfolio_10(
     """
     if bye_teams is None:
         bye_teams = {"SEA", "DEN"}
+
+    # Ensure uniqueness so idx.loc[lineup] always returns exactly 6 rows
+    pool = pool.sort_values("FastPlayerValue", ascending=False).drop_duplicates(subset=["Player"], keep="first").copy()
 
     rng = np.random.default_rng(rng_seed)
 
