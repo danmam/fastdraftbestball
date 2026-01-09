@@ -172,7 +172,16 @@ if st.button("Generate optimized 10 entries"):
     summary = result["portfolio_summary"].copy()
     st.write("Lineups with any LAR:", int((summary["NumRams"] > 0).sum()))
     st.write("Lineups with >=3 LAR:", int((summary["NumRams"] >= 3).sum()))
-    
+    st.subheader("Final 10 Lineups")
+
+    for i, lineup_df in enumerate(result["portfolio_lineups"], start=1):
+        st.markdown(f"### Lineup {i}")
+        st.dataframe(
+            lineup_df[["Player", "Team", "FastPlayerValue", "Booster"]],
+            use_container_width=True,
+            hide_index=True,
+        )
+
     # =============================
     # Screened set inspection
     # =============================
@@ -318,6 +327,7 @@ with st.expander("📊 Full Draft Board"):
         height=500,
         use_container_width=True,
     )
+
 
 
 
