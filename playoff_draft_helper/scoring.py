@@ -5,14 +5,14 @@ def compute_xgp(team_row) -> float:
     if bool(team_row["Has_WC_Game"]):
         return float(min(
             4.0,
-            1 + team_row["Chance to Make Div Round"]
-              + team_row["Chance to Make Conf. Champ."]
-              + team_row["Chance to Make Super Bowl"]
+            1 + team_row["P_make_div"]
+              + team_row["P_make_conf"]
+              + team_row["P_make_sb"]
         ))
     return float(min(
         3.0,
-        1 + team_row["Chance to Make Conf. Champ."]
-          + team_row["Chance to Make Super Bowl"]
+        1 + team_row["P_make_conf"]
+          + team_row["P_make_sb"]
     ))
 
 def tefp(player_row, team_row) -> float:
@@ -33,3 +33,4 @@ def ceiling_with_eff_games(player_row, team_row, eff_games: float) -> float:
     if bool(team_row["Has_WC_Game"]):
         return float(player_row["Wild Card Ceiling FPTS"] + (eff_games - 1) * player_row["Div, Conf, SB  Ceiling FPTS"])
     return float(eff_games * player_row["Div, Conf, SB  Ceiling FPTS"])
+
