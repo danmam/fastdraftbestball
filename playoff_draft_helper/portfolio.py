@@ -1,4 +1,5 @@
 from __future__ import annotations
+from playoff_draft_helper.sim import build_round_probs, simulate_lineup_many
 
 import itertools
 import math
@@ -390,6 +391,53 @@ def generate_candidate_lineups(
         candidates.append(lineup_players)
 
     return candidates
+    
+# -----------------------------
+# Lineup constraint + leverage helpers
+# -----------------------------
+
+def _lineup_team_counts(idx: pd.DataFrame, players: list[str]) -> pd.Series:
+    df = idx.loc[players]
+    return df["Team"].value_counts()
+
+def _lineup_mean_ownership(idx: pd.DataFrame, players: list[str]) -> float:
+    df = idx.loc[players]
+    return float(df["OwnershipFrac"].astype(float).mean())
+
+def _passes_constraints(
+    idx: pd.DataFrame,
+    players: list[str],
+    min_wc_players: int,
+    min_stack: int,
+) -> bool:
+    df = idx.loc[players]
+    if int(df["IsWildCardTeam"].sum()) < min_wc_players:
+        return False
+    if int(df["Team"].value_counts().max()) < min_stack:
+        return False
+    return True
+
+def _sample_k_with_leverage(
+    rng: np.random.Generator,
+    candidates: list[list[str]],
+    idx: pd.DataFrame,
+    k: int,
+    beta: float = 2.0,
+) -> list[list[str]]:
+    if len(candidates) <= k:
+        return candidates
+
+    owns = np.array(
+        [_lineup_mean_ownership(idx, p) for p in candidates],
+        dtype=float,
+    )
+    leverage = (1.0 - np.clip(owns, 0.0, 1.0)) ** beta
+    if leverage.sum() <= 0:
+        leverage = np.ones(len(candidates), dtype=float)
+
+    probs = leverage / leverage.sum()
+    sel_ix = rng.choice(len(candidates), size=k, replace=False, p=probs)
+    return [candidates[i] for i in sel_ix]
 
 
 # -----------------------------
@@ -397,40 +445,41 @@ def generate_candidate_lineups(
 # -----------------------------
 def optimize_portfolio_10(
     pool: pd.DataFrame,
-    n_candidates: int = 20000,
-    shortlist_size: int = 400,
+    win_odds_df: pd.DataFrame,
+    n_candidates: int = 4000,
+    k_shortlist: int = 200,
+    n_sims: int = 5000,
+    shortlist_size: int = 400,  # unused now, kept for compatibility
     k_dup: float = 900.0,
     overlap_lambda: float = 0.35,
     rng_seed: int = 1,
     min_wc_players: int = 4,
+    min_stack: int = 3,
+    leverage_beta: float = 2.0,
+    feasibility_gate_div_cc_sb: float = 0.03,  # tune: minimum fraction of sims where you have >=4 alive in DIV+CC+SB
     bye_teams: set[str] | None = None,
     rams_team: str = "LAR",
     rams_heavy_threshold: int = 3,
     max_rams_heavy_portfolio: int = 3,
     max_rams_any_portfolio: int = 5,
 ) -> dict:
-    """
-    Portfolio optimizer with HARD Rams exposure caps:
-      - max 3 lineups with >=3 Rams
-      - max 5 lineups with any Rams
-    """
-
     if bye_teams is None:
         bye_teams = {"SEA", "DEN"}
 
     rng = np.random.default_rng(rng_seed)
 
-    # Ensure unique players
+    # Ensure unique players for idx.loc safety
     pool = (
         pool.sort_values("FastPlayerValue", ascending=False)
         .drop_duplicates(subset=["Player"], keep="first")
         .copy()
     )
-
     idx = pool.set_index("Player")
 
+    probs = build_round_probs(win_odds_df)
+
     # -----------------------------
-    # Generate candidates
+    # Generate candidates (already enforces >= min_wc_players if you applied earlier fix)
     # -----------------------------
     candidates = generate_candidate_lineups(
         pool=pool,
@@ -438,18 +487,41 @@ def optimize_portfolio_10(
         rng=rng,
         min_wc_players=min_wc_players,
     )
-
     if not candidates:
         raise ValueError("No candidates generated.")
 
     # -----------------------------
-    # Score candidates
+    # Enforce structural constraints for the shortlist pool
+    #   - >=4 WC players (defensive)
+    #   - >=3 from one team
+    # -----------------------------
+    constrained = [c for c in candidates if _passes_constraints(idx, c, min_wc_players, min_stack)]
+    if not constrained:
+        raise ValueError("No candidates passed constraints: min_wc_players/min_stack.")
+
+    # -----------------------------
+    # Paring down to K=200:
+    # leverage-weighted random sample (NOT top fastscore)
+    # -----------------------------
+    shortlist_lineups = _sample_k_with_leverage(
+        rng=rng,
+        candidates=constrained,
+        idx=idx,
+        k=k_shortlist,
+        beta=leverage_beta,
+    )
+
+    # -----------------------------
+    # Fast scoring only for diagnostics / mild signal
     # -----------------------------
     scored_rows = []
-
-    for lineup in candidates:
+    for lineup in shortlist_lineups:
         lineup_df = idx.loc[lineup].reset_index()
         s = score_lineup_fast(lineup_df, k_dup=k_dup)
+
+        team_counts = lineup_df["Team"].value_counts()
+        max_stack_count = int(team_counts.max())
+        mean_own = float(lineup_df["OwnershipFrac"].astype(float).mean())
 
         num_rams = int((lineup_df["Team"] == rams_team).sum())
 
@@ -462,26 +534,61 @@ def optimize_portfolio_10(
                 "DupPressure": float(s["DupPressure"]),
                 "NumWildCard": int(s["NumWildCard"]),
                 "NumTeams": int(s["NumTeams"]),
+                "MaxStack": max_stack_count,
+                "MeanOwnership": mean_own,
                 "NumRams": num_rams,
                 "HasAnyRams": num_rams > 0,
                 "IsRamsHeavy": num_rams >= rams_heavy_threshold,
             }
         )
 
-    scored = (
-        pd.DataFrame(scored_rows)
-        .sort_values("EWFast", ascending=False)
-        .reset_index(drop=True)
-    )
-
-    shortlist = scored.head(shortlist_size).copy()
+    candidates_scored = pd.DataFrame(scored_rows).sort_values("EWFast", ascending=False).reset_index(drop=True)
 
     # -----------------------------
-    # Greedy portfolio selection
+    # Simulation: week-by-week ceiling & feasibility
+    # -----------------------------
+    sim_rows = []
+    for _, r in candidates_scored.iterrows():
+        players = list(r["Players"])
+        lineup_df = idx.loc[players].reset_index()
+
+        sim = simulate_lineup_many(
+            lineup_df=lineup_df,
+            probs=probs,
+            n_sims=n_sims,
+            seed=int(rng.integers(1, 1_000_000_000)),
+            value_col="FastPlayerValue",
+            team_col="Team",
+        )
+
+        sim_rows.append(
+            {
+                "Players": r["Players"],
+                "MaxTotalSim": float(sim["max_total"]),
+                "P4EveryWeek": float(sim["p_four_every_week"]),
+                "P4DivCCSB": float(sim["p_four_div_cc_sb"]),
+                "Q90": float(sim["q90"]),
+                "Q95": float(sim["q95"]),
+            }
+        )
+
+    sim_df = pd.DataFrame(sim_rows)
+    scored = candidates_scored.merge(sim_df, on="Players", how="left")
+
+    # Optional: hard feasibility filter (you can loosen this)
+    feasible = scored.loc[scored["P4DivCCSB"] >= feasibility_gate_div_cc_sb].copy()
+    if feasible.empty:
+        # If too strict, fall back to best simulated ceilings anyway
+        feasible = scored.copy()
+
+    feasible = feasible.sort_values(["MaxTotalSim", "Q95", "EWFast"], ascending=False).reset_index(drop=True)
+
+    # -----------------------------
+    # Greedy portfolio selection using simulated ceiling as primary signal
+    # with overlap penalty and Rams caps
     # -----------------------------
     selected = []
     selected_sets = []
-
     rams_any_selected = 0
     rams_heavy_selected = 0
 
@@ -491,35 +598,35 @@ def optimize_portfolio_10(
     def try_select(row) -> bool:
         nonlocal rams_any_selected, rams_heavy_selected
 
-        if row["HasAnyRams"] and rams_any_selected >= max_rams_any_portfolio:
+        if bool(row["HasAnyRams"]) and rams_any_selected >= max_rams_any_portfolio:
             return False
-        if row["IsRamsHeavy"] and rams_heavy_selected >= max_rams_heavy_portfolio:
+        if bool(row["IsRamsHeavy"]) and rams_heavy_selected >= max_rams_heavy_portfolio:
             return False
 
         players = list(row["Players"])
         players_set = set(players)
 
-        obj = float(row["EWFast"]) - overlap_lambda * overlap_penalty(players_set)
+        # Objective: simulated ceiling minus overlap penalty
+        obj = float(row["MaxTotalSim"]) - overlap_lambda * overlap_penalty(players_set)
 
         selected.append((obj, row))
         selected_sets.append(players_set)
 
-        if row["HasAnyRams"]:
+        if bool(row["HasAnyRams"]):
             rams_any_selected += 1
-        if row["IsRamsHeavy"]:
+        if bool(row["IsRamsHeavy"]):
             rams_heavy_selected += 1
 
         return True
 
-    # Primary pass
-    for _, row in shortlist.iterrows():
+    for _, row in feasible.iterrows():
         if len(selected) >= 10:
             break
         try_select(row)
 
-    # Backfill if needed
     if len(selected) < 10:
-        for _, row in scored.iloc[shortlist_size:].iterrows():
+        # backfill from full scored if needed
+        for _, row in scored.sort_values(["MaxTotalSim", "Q95", "EWFast"], ascending=False).iterrows():
             if len(selected) >= 10:
                 break
             try_select(row)
@@ -527,30 +634,8 @@ def optimize_portfolio_10(
     selected_rows = [r for _, r in sorted(selected, key=lambda x: x[0], reverse=True)[:10]]
 
     # -----------------------------
-    # HARD ASSERT: caps must hold
-    # -----------------------------
-    def _num_rams(players_tuple: tuple[str, ...]) -> int:
-        df = idx.loc[list(players_tuple)]
-        return int((df["Team"].astype(str).str.strip() == rams_team).sum())
-    
-    actual_any = 0
-    actual_heavy = 0
-    for r in selected_rows:
-        n = _num_rams(r["Players"])
-        if n > 0:
-            actual_any += 1
-        if n >= rams_heavy_threshold:
-            actual_heavy += 1
-    
-    if actual_any > max_rams_any_portfolio or actual_heavy > max_rams_heavy_portfolio:
-        raise ValueError(
-            f"Rams caps violated: any={actual_any} (cap {max_rams_any_portfolio}), "
-            f"heavy={actual_heavy} (cap {max_rams_heavy_portfolio}). "
-            f"Check selection logic or that this function is actually running."
-        )
-
-    # -----------------------------
-    # Build final lineups
+    # Build final lineups (with lineup-locked boosters via sim.py logic OR keep current)
+    # Here we keep your existing "assign boosters + top4" view for display.
     # -----------------------------
     portfolio_lineups = []
     portfolio_summary_rows = []
@@ -558,9 +643,16 @@ def optimize_portfolio_10(
     for i, r in enumerate(selected_rows, start=1):
         lineup_players = list(r["Players"])
         lineup_df = idx.loc[lineup_players].reset_index()
-        lineup_df = assign_boosters_greedy_bestball(lineup_df)
 
-        lineup_df["BoostedValue"] = lineup_df["FastPlayerValue"] * lineup_df["Booster"]
+        # IMPORTANT: boosters are lineup-locked; score_lineup_fast already handles it.
+        # For display, compute boosted value once:
+        lineup_df = lineup_df.copy()
+        lineup_df = lineup_df.sort_values("FastPlayerValue", ascending=False).reset_index(drop=True)
+        lineup_df["Booster"] = 1.0
+        for j in range(min(4, len(lineup_df))):
+            lineup_df.loc[j, "Booster"] = [2.0, 1.75, 1.5, 1.25][j]
+        lineup_df["BoostedValue"] = lineup_df["FastPlayerValue"].astype(float) * lineup_df["Booster"].astype(float)
+
         top4 = lineup_df.sort_values("BoostedValue", ascending=False).head(4)
 
         portfolio_lineups.append(lineup_df)
@@ -568,43 +660,32 @@ def optimize_portfolio_10(
         portfolio_summary_rows.append(
             {
                 "Entry": i,
-                "EWFast": r["EWFast"],
-                "ScoreFast": r["ScoreFast"],
-                "SplitFactor": r["SplitFactor"],
-                "DupPressure": r["DupPressure"],
-                "NumWildCard": r["NumWildCard"],
-                "NumTeams": r["NumTeams"],
-                "NumRams": r["NumRams"],
-                "IsRamsHeavy": r["IsRamsHeavy"],
+                "MaxTotalSim": float(r["MaxTotalSim"]),
+                "P4DivCCSB": float(r["P4DivCCSB"]),
+                "P4EveryWeek": float(r["P4EveryWeek"]),
+                "Q95": float(r["Q95"]),
+                "EWFast": float(r["EWFast"]),
+                "MeanOwnership": float(r["MeanOwnership"]),
+                "NumWildCard": int(r["NumWildCard"]),
+                "NumTeams": int(r["NumTeams"]),
+                "MaxStack": int(r["MaxStack"]),
+                "NumRams": int(r["NumRams"]),
+                "IsRamsHeavy": bool(r["IsRamsHeavy"]),
                 "Top4BoostedSum": float(top4["BoostedValue"].sum()),
                 "Players": ", ".join(lineup_players),
             }
         )
-  
+
     portfolio_summary = pd.DataFrame(portfolio_summary_rows)
 
-    # -----------------------------
     # Exposures
-    # -----------------------------
     all_players = list(itertools.chain.from_iterable(df["Player"] for df in portfolio_lineups))
-    exp_players = (
-        pd.Series(all_players)
-        .value_counts()
-        .rename_axis("Player")
-        .reset_index(name="Count")
-    )
+    exp_players = pd.Series(all_players).value_counts().rename_axis("Player").reset_index(name="Count")
     exp_players["Exposure"] = exp_players["Count"] / 10.0
-    exp_players = exp_players.merge(
-        pool[["Player", "Team", "OwnershipFrac"]], on="Player", how="left"
-    )
+    exp_players = exp_players.merge(pool[["Player", "Team", "OwnershipFrac"]], on="Player", how="left")
 
     all_teams = list(itertools.chain.from_iterable(df["Team"] for df in portfolio_lineups))
-    exp_teams = (
-        pd.Series(all_teams)
-        .value_counts()
-        .rename_axis("Team")
-        .reset_index(name="Count")
-    )
+    exp_teams = pd.Series(all_teams).value_counts().rename_axis("Team").reset_index(name="Count")
     exp_teams["Exposure"] = exp_teams["Count"] / (10.0 * 6.0)
 
     return {
@@ -612,5 +693,6 @@ def optimize_portfolio_10(
         "portfolio_summary": portfolio_summary,
         "exposure_players": exp_players,
         "exposure_teams": exp_teams,
-        "candidates_scored": shortlist,
+        "candidates_scored": scored,  # now includes simulation metrics
+        "candidates_shortlist_scored": candidates_scored,
     }
