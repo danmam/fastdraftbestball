@@ -349,7 +349,7 @@ def optimize_portfolio_10(
     idx = pool.set_index("Player")
 
     probs = build_round_probs(win_odds_df)
-
+    print("STEP 1: Generating candidates...")
     # 1) Generate candidates (strict WC constraint)
     candidates = generate_candidate_lineups(
         pool=pool,
@@ -357,6 +357,7 @@ def optimize_portfolio_10(
         rng=rng,
         min_wc_players=min_wc_players,
     )
+    print(f"STEP 2: {len(candidates)} candidates generated")
     if not candidates:
         raise ValueError("No candidates generated.")
 
@@ -407,7 +408,8 @@ def optimize_portfolio_10(
         .sort_values("EWFast", ascending=False)
         .reset_index(drop=True)
     )
-
+    
+    print("STEP 3: Starting simulation loop...")
     # 5) Week-by-week simulation on shortlist
     sim_rows = []
     for _, r in candidates_scored.iterrows():
