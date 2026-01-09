@@ -89,6 +89,8 @@ with top_right:
 # --------------------------------------------------
 # Compute board
 # --------------------------------------------------
+print("win_by_team columns:", win_by_team.columns.tolist())
+
 board, recommendations, meta = compute_board(
     players_df=players,
     win_odds_df=win_odds,
@@ -297,6 +299,7 @@ with st.expander("📊 Full Draft Board"):
         height=500,
         use_container_width=True,
     )
+
 
 
 
