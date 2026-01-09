@@ -527,6 +527,29 @@ def optimize_portfolio_10(
     selected_rows = [r for _, r in sorted(selected, key=lambda x: x[0], reverse=True)[:10]]
 
     # -----------------------------
+    # HARD ASSERT: caps must hold
+    # -----------------------------
+    def _num_rams(players_tuple: tuple[str, ...]) -> int:
+        df = idx.loc[list(players_tuple)]
+        return int((df["Team"].astype(str).str.strip() == rams_team).sum())
+    
+    actual_any = 0
+    actual_heavy = 0
+    for r in selected_rows:
+        n = _num_rams(r["Players"])
+        if n > 0:
+            actual_any += 1
+        if n >= rams_heavy_threshold:
+            actual_heavy += 1
+    
+    if actual_any > max_rams_any_portfolio or actual_heavy > max_rams_heavy_portfolio:
+        raise ValueError(
+            f"Rams caps violated: any={actual_any} (cap {max_rams_any_portfolio}), "
+            f"heavy={actual_heavy} (cap {max_rams_heavy_portfolio}). "
+            f"Check selection logic or that this function is actually running."
+        )
+
+    # -----------------------------
     # Build final lineups
     # -----------------------------
     portfolio_lineups = []
