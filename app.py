@@ -168,6 +168,11 @@ if st.button("Generate optimized 10 entries"):
         bye_teams=bye_teams,
     )
 
+    st.subheader("DEBUG: Rams caps in selected portfolio")
+    summary = result["portfolio_summary"].copy()
+    st.write("Lineups with any LAR:", int((summary["NumRams"] > 0).sum()))
+    st.write("Lineups with >=3 LAR:", int((summary["NumRams"] >= 3).sum()))
+    
     # =============================
     # Screened set inspection
     # =============================
@@ -313,6 +318,7 @@ with st.expander("📊 Full Draft Board"):
         height=500,
         use_container_width=True,
     )
+
 
 
 
