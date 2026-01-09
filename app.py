@@ -156,7 +156,18 @@ if st.button("Generate optimized 10 entries"):
         bye_teams=bye_teams,
     )
 
-        # =============================
+    result = optimize_portfolio_10(
+    pool=pool,
+    n_candidates=int(n_candidates),
+    shortlist_size=int(shortlist_size),
+    k_dup=float(k_dup),
+    overlap_lambda=float(overlap_lambda),
+    rng_seed=1,
+    min_wc_players=4,
+    bye_teams=bye_teams,
+    )
+
+    # =============================
     # Screened set inspection
     # =============================
     screened = result["candidates_scored"]
@@ -302,6 +313,7 @@ with st.expander("📊 Full Draft Board"):
         height=500,
         use_container_width=True,
     )
+
 
 
 
