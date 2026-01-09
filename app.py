@@ -2,7 +2,7 @@ import streamlit as st
 import pandas as pd
 
 from playoff_draft_helper.data import load_data
-from playoff_draft_helper.sim import build_round_probs, simulate_conditionals
+from playoff_draft_helper.sim import build_round_probs
 from playoff_draft_helper.board import compute_board
 from playoff_draft_helper.bracket import NFC_TEAMS, AFC_TEAMS
 from playoff_draft_helper.portfolio import (
@@ -327,6 +327,7 @@ with st.expander("📊 Full Draft Board"):
         height=500,
         use_container_width=True,
     )
+
 
 
 
