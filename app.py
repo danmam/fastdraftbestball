@@ -125,6 +125,36 @@ with right:
             if st.button(f"Drafted by Other", key=f"other_{row['Player']}"):
                 st.session_state.drafted_by_others.append(row["Player"])
                 st.rerun()
+                
+# --------------------------------------------------
+# QUICK DRAFT (Non-Top-10 Players)
+# --------------------------------------------------
+st.subheader("⚡ Quick Draft (Any Player)")
+
+available_players = (
+    board.loc[board["Available"], "Player"]
+    .sort_values()
+    .tolist()
+)
+
+quick_pick = st.selectbox(
+    "Select any available player",
+    options=[""] + available_players,
+    index=0,
+)
+
+if quick_pick:
+    c1, c2 = st.columns(2)
+
+    with c1:
+        if st.button("Draft to My Team", key="quick_me"):
+            st.session_state.drafted_by_you.append(quick_pick)
+            st.rerun()
+
+    with c2:
+        if st.button("Drafted by Other Team", key="quick_other"):
+            st.session_state.drafted_by_others.append(quick_pick)
+            st.rerun()
 
 # --------------------------------------------------
 # OPTIONAL: Full board (collapsed)
@@ -147,4 +177,5 @@ with st.expander("📊 Full Draft Board"):
         height=500,
         use_container_width=True,
     )
+
 
