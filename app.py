@@ -156,34 +156,22 @@ if st.button("Generate optimized 10 entries"):
         bye_teams=bye_teams,
     )
 
-    result = optimize_portfolio_10(
-        pool=pool,
-        n_candidates=int(n_candidates),
-        shortlist_size=int(shortlist_size),
-        k_dup=float(k_dup),
-        overlap_lambda=float(overlap_lambda),
-        rng_seed=1,
-        min_wc_players=4,
-        bye_teams=bye_teams,
-    )
-
-    st.subheader("🔍 Screened Lineups (Top Candidates)")
-
-    st.dataframe(
-        result["candidates_scored"].head(200),
-        use_container_width=True,
-        height=500,
-    )
-
-    with st.expander("🔍 Screened Lineups (Top K)"):
-    st.dataframe(
-        result["candidates_scored"].head(200),
-        use_container_width=True,
-        height=500,
-    )
-
+        # =============================
+    # Screened set inspection
+    # =============================
     screened = result["candidates_scored"]
 
+    st.subheader("🔍 Screened Lineups (Top 200)")
+    st.dataframe(
+        screened.head(200),
+        use_container_width=True,
+        height=500,
+    )
+
+    st.subheader("📉 EWFast decay (Top 200)")
+    st.line_chart(screened["EWFast"].head(200))
+
+    # Team frequency in screened set
     teams = (
         screened["Players"]
         .apply(lambda ps: pd.Series(ps))
@@ -194,23 +182,10 @@ if st.button("Generate optimized 10 entries"):
     team_counts = teams.value_counts().reset_index()
     team_counts.columns = ["Team", "Appearances"]
 
-    st.subheader("Team frequency in screened set")
+    st.subheader("🏈 Team frequency in screened set")
     st.dataframe(team_counts.head(10), use_container_width=True)
 
-    st.subheader("EWFast decay (screened set)")
-    st.line_chart(screened["EWFast"].head(200))
-
-        screened["TeamSet"] = screened["Players"].apply(
-        lambda ps: tuple(sorted(players.set_index("Player").loc[list(ps), "Team"].unique()))
-    )
-
-    st.subheader("Most common team combinations")
-    st.dataframe(
-        screened["TeamSet"].value_counts().head(10).reset_index(),
-        use_container_width=True,
-    )
-
-
+    
     st.session_state["portfolio_result"] = result
     st.rerun()
 
@@ -327,5 +302,6 @@ with st.expander("📊 Full Draft Board"):
         height=500,
         use_container_width=True,
     )
+
 
 
