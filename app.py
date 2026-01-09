@@ -45,25 +45,8 @@ if not (players_fp and win_odds_fp and adp_fp):
 # --------------------------------------------------
 # Load + simulate (cached)
 # --------------------------------------------------
-@st.cache_data(show_spinner=False)
-def load_and_simulate(players_fp, win_odds_fp, adp_fp):
-    players, win_odds, adp = load_data(players_fp, win_odds_fp, adp_fp)
 
-    probs = build_round_probs(win_odds)
-
-    cond_nfc, exp_not_nfc, _ = simulate_conditionals(
-        "NFC", probs, n_sims=150_000, seed=1
-    )
-    cond_afc, exp_not_afc, _ = simulate_conditionals(
-        "AFC", probs, n_sims=150_000, seed=2
-    )
-
-    return players, win_odds, adp, cond_nfc, exp_not_nfc, cond_afc, exp_not_afc
-
-
-players, win_odds, adp, cond_nfc, exp_not_nfc, cond_afc, exp_not_afc = load_and_simulate(
-    players_fp, win_odds_fp, adp_fp
-)
+players, win_odds, adp = load_data(players_fp, win_odds_fp, adp_fp)
 
 # --------------------------------------------------
 # TOP BAR: Pick info + locks
@@ -331,6 +314,7 @@ with st.expander("📊 Full Draft Board"):
         height=500,
         use_container_width=True,
     )
+
 
 
 
