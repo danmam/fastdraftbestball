@@ -137,6 +137,47 @@ with right:
             if st.button(f"Drafted by Other", key=f"other_{row['Player']}"):
                 st.session_state.drafted_by_others.append(row["Player"])
                 st.rerun()
+
+# --------------------------------------------------
+# ADP PRESSURE VIEW (Next 10 by ADP)
+# --------------------------------------------------
+st.subheader("📈 Next 10 by ADP (Draft Pressure)")
+
+adp_view = (
+    board.loc[board["Available"]]
+    .sort_values("ADP_Rank")
+    .head(10)
+)
+
+st.dataframe(
+    adp_view[
+        [
+            "Player",
+            "Team",
+            "ADP_Rank",
+            "DraftPool_EffectiveCeiling",
+        ]
+    ],
+    height=300,
+    use_container_width=True,
+)
+
+st.markdown("**Quick Draft Actions (ADP View)**")
+
+for _, row in adp_view.iterrows():
+    st.markdown(f"**{row['Player']} ({row['Team']})**")
+
+    c1, c2 = st.columns(2)
+
+    with c1:
+        if st.button(f"Draft Me", key=f"adp_me_{row['Player']}"):
+            st.session_state.drafted_by_you.append(row["Player"])
+            st.rerun()
+
+    with c2:
+        if st.button(f"Drafted by Other", key=f"adp_other_{row['Player']}"):
+            st.session_state.drafted_by_others.append(row["Player"])
+            st.rerun()
                 
 # --------------------------------------------------
 # QUICK DRAFT (Non-Top-10 Players)
@@ -189,6 +230,7 @@ with st.expander("📊 Full Draft Board"):
         height=500,
         use_container_width=True,
     )
+
 
 
 
