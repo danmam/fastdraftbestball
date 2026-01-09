@@ -33,12 +33,24 @@ def compute_board(
         meta              : lock metadata
     """
 
-    # -----------------------------
-    # Lookups
-    # -----------------------------
-    win_by_team = (
-    win_odds_df
-    .loc[:, ["Team", "P_make_div", "P_make_conf", "P_make_sb", "Has_WC_Game"]]
+   # -----------------------------
+# Lookups
+# -----------------------------
+required_team_cols = [
+    "Team",
+    "P_make_div",
+    "P_make_conf",
+    "P_make_sb",
+    "Has_WC_Game",
+    "Max_Games",
+]
+
+missing = [c for c in required_team_cols if c not in win_odds_df.columns]
+if missing:
+    raise ValueError(f"win_odds_df missing required columns for board/scoring: {missing}")
+
+win_by_team = (
+    win_odds_df.loc[:, required_team_cols]
     .set_index("Team")
 )
 
