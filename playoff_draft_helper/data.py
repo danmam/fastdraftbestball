@@ -2,11 +2,10 @@
 import pandas as pd
 import numpy as np
 
-PCT_COLS = [
-    "Pick to Win Popularity (Wild Card)",
-    "Chance to Make Div Round",
-    "Chance to Make Conf. Champ.",
-    "Chance to Make Super Bowl",
+ODDS_COLS = [
+    "P_make_div",
+    "P_make_conf",
+    "P_make_sb",
 ]
 
 def _pct_to_decimal(s: pd.Series) -> pd.Series:
@@ -38,3 +37,4 @@ def load_data(players_csv, win_odds_csv, adp_csv):
     win_odds["Max_Games"] = np.where(win_odds["Has_WC_Game"], 4.0, 3.0)
 
     return players, win_odds, adp
+
