@@ -167,6 +167,14 @@ if st.button("Generate optimized 10 entries"):
         bye_teams=bye_teams,
     )
 
+    st.subheader("🔍 Screened Lineups (Top Candidates)")
+
+    st.dataframe(
+        result["candidates_scored"].head(200),
+        use_container_width=True,
+        height=500,
+    )
+
     st.session_state["portfolio_result"] = result
     st.rerun()
 
@@ -283,3 +291,4 @@ with st.expander("📊 Full Draft Board"):
         height=500,
         use_container_width=True,
     )
+
