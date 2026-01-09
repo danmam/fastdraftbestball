@@ -184,7 +184,7 @@ def generate_candidate_lineups(
     pool: pd.DataFrame,
     n_candidates: int,
     rng: np.random.Generator,
-    min_wc_players: int = 4,
+    min_wc_players: int = 3,
     max_players_per_team: int = 4,
     top_team_pool_size: int = 10,
 ) -> list[list[str]]:
@@ -325,8 +325,8 @@ def optimize_portfolio_10(
     k_dup: float = 900.0,
     overlap_lambda: float = 0.35,
     rng_seed: int = 1,
-    min_wc_players: int = 4,
-    min_stack: int = 3,
+    min_wc_players: int = 3,
+    min_stack: int = 2,
     leverage_beta: float = 2.0,
     feasibility_gate_div_cc_sb: float = 0.03,
     bye_teams: set[str] | None = None,
@@ -408,8 +408,7 @@ def optimize_portfolio_10(
         .sort_values("EWFast", ascending=False)
         .reset_index(drop=True)
     )
-    
-    print("STEP 3: Starting simulation loop...")
+    print("CANDIDATES_SCORED SIZE:", len(candidates_scored))
     # 5) Week-by-week simulation on shortlist
     sim_rows = [] 
     n_lineups = len(candidates_scored) 
