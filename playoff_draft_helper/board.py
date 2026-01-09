@@ -36,7 +36,11 @@ def compute_board(
     # -----------------------------
     # Lookups
     # -----------------------------
-    win_by_team = win_odds_df.set_index("Team")
+    win_by_team = (
+    win_odds
+    .loc[:, ["Team", "P_make_div", "P_make_conf", "P_make_sb", "Has_WC_Game"]]
+    .set_index("Team")
+)
     player_to_team = dict(zip(players_df["Player"], players_df["Team"]))
 
     drafted_set = set(drafted_players_in_order)
