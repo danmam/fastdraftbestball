@@ -31,14 +31,14 @@ def compute_board(
     lock_override_afc: str | None = None,
 ) -> pd.DataFrame:
     
-    return out.sort_values("DraftPool_EffectiveCeiling", ascending=False), meta
-
     win_by_team = win_odds_df.set_index("Team")
     player_to_team = dict(zip(players_df["Player"], players_df["Team"]))
 
     auto_locks = first_team_lock_by_conference(drafted_players_in_order, player_to_team)
     lock_nfc = lock_override_nfc if lock_override_nfc else auto_locks["NFC"]
     lock_afc = lock_override_afc if lock_override_afc else auto_locks["AFC"]
+
+    return out.sort_values("DraftPool_EffectiveCeiling", ascending=False), meta
 
 def eff_games(team: str) -> float:
     conf = conference_of(team)
