@@ -466,7 +466,7 @@ def optimize_portfolio_10(
     if bye_teams is None:
         bye_teams = {"SEA", "DEN"}
 
-    rng = np.random.default_rng(rng_seed)
+    rng = np.random.default_rng(rng_seed + int(np.random.randint(0, 1_000_000)))
 
     # Ensure unique players for idx.loc safety
     pool = (
@@ -489,6 +489,9 @@ def optimize_portfolio_10(
     )
     if not candidates:
         raise ValueError("No candidates generated.")
+    st.write("First 5 candidate lineups:")
+    for i, c in enumerate(candidates[:5]):
+        st.write(i, c)
 
     # -----------------------------
     # Enforce structural constraints for the shortlist pool
@@ -510,6 +513,9 @@ def optimize_portfolio_10(
         k=k_shortlist,
         beta=leverage_beta,
     )
+    st.write("First 5 shortlisted lineups:")
+    for i, c in enumerate(shortlist_lineups[:5]):
+        st.write(i, c)
 
     # -----------------------------
     # Fast scoring only for diagnostics / mild signal
