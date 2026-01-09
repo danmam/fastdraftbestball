@@ -99,6 +99,10 @@ with top_right:
 # --------------------------------------------------
 # Compute board
 # --------------------------------------------------
+cond_nfc = {} 
+exp_not_nfc = {} 
+cond_afc = {} 
+exp_not_afc = {}
 board, recommendations, meta = compute_board(
     players_df=players,
     win_odds_df=win_odds,
@@ -327,6 +331,7 @@ with st.expander("📊 Full Draft Board"):
         height=500,
         use_container_width=True,
     )
+
 
 
 
