@@ -21,6 +21,10 @@ if "drafted_by_you" not in st.session_state:
 if "drafted_by_others" not in st.session_state:
     st.session_state.drafted_by_others = []
 
+def reset_draft():
+    st.session_state.drafted_by_you = []
+    st.session_state.drafted_by_others = []
+
 # --------------------------------------------------
 # File uploads (collapsed once loaded)
 # --------------------------------------------------
@@ -72,6 +76,14 @@ lock_afc_val = None if lock_afc == "(auto)" else lock_afc
 with top_right:
     st.markdown("### Your Roster")
     st.write(st.session_state.drafted_by_you)
+
+with top_right:
+    st.markdown("### Your Roster")
+    st.write(st.session_state.drafted_by_you)
+
+    if st.button("🔄 Reset Draft"):
+        reset_draft()
+        st.rerun()
 
 # --------------------------------------------------
 # Compute board
@@ -177,5 +189,6 @@ with st.expander("📊 Full Draft Board"):
         height=500,
         use_container_width=True,
     )
+
 
 
