@@ -44,7 +44,7 @@ if not (players_fp and win_odds_fp and adp_fp):
 # --------------------------------------------------
 # Load + simulate (cached by Streamlit)
 # --------------------------------------------------
-@st.cache_data(show_spinner=False)
+@st.cache_data(show_spinner=False, ttl=1)
 def load_and_simulate(players_fp, win_odds_fp, adp_fp):
     players, win_odds, adp = load_data(players_fp, win_odds_fp, adp_fp)
     probs = build_round_probs(win_odds)
@@ -298,6 +298,7 @@ with st.expander("📊 Full Draft Board"):
         height=500,
         use_container_width=True,
     )
+
 
 
 
