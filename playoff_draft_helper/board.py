@@ -30,6 +30,8 @@ def compute_board(
     lock_override_nfc: str | None = None,
     lock_override_afc: str | None = None,
 ) -> pd.DataFrame:
+    
+    return out.sort_values("DraftPool_EffectiveCeiling", ascending=False), meta
 
     win_by_team = win_odds_df.set_index("Team")
     player_to_team = dict(zip(players_df["Player"], players_df["Team"]))
