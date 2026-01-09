@@ -320,7 +320,7 @@ def optimize_portfolio_10(
     win_odds_df: pd.DataFrame,
     n_candidates: int = 4000,
     k_shortlist: int = 200,
-    n_sims: int = 5000,
+    n_sims: int = 500,
     shortlist_size: int = 400,  # kept for backward compat; not used
     k_dup: float = 900.0,
     overlap_lambda: float = 0.35,
@@ -411,8 +411,12 @@ def optimize_portfolio_10(
     
     print("STEP 3: Starting simulation loop...")
     # 5) Week-by-week simulation on shortlist
-    sim_rows = []
-    for _, r in candidates_scored.iterrows():
+    sim_rows = [] 
+    n_lineups = len(candidates_scored) 
+    
+    for i, (_, r) in enumerate(candidates_scored.iterrows()): 
+        if i % 5 == 0: 
+            print(f"[SIM] Starting lineup {i+1}/{n_lineups}")
         players = list(r["Players"])
         lineup_df = idx.loc[players].reset_index()
 
@@ -422,7 +426,7 @@ def optimize_portfolio_10(
             n_sims=n_sims,
             seed=int(rng.integers(1, 1_000_000_000)),
         )
-
+        print(f"[SIM] Finished lineup {i+1}/{n_lineups}")
         sim_rows.append(
             {
                 "Players": r["Players"],
