@@ -114,3 +114,41 @@ def simulate_conditionals(conf: str, probs: RoundWinProbs, n_sims: int = 200000,
         exp_if_not_champ[t] = (sums_not_champ[t] / denom) if denom > 0 else np.nan
 
     return cond_by_champ, exp_if_not_champ, champ_counts
+def simulate_lineup_many(
+    lineup_df,
+    probs: RoundWinProbs,
+    n_sims: int = 50000,
+    seed: int = 1,
+    value_col: str = "FastPlayerValue",
+    team_col: str = "Team",
+):
+    rng = np.random.default_rng(seed)
+
+    totals = np.zeros(n_sims, dtype=float)
+    ok_all = 0
+    ok_late = 0
+
+    for i in range(n_sims):
+        sim_out = simulate_nfl_once(probs, rng)
+        scored = score_lineup_one_universe(
+            lineup_df=lineup_df,
+            sim_out=sim_out,
+            value_col=value_col,
+            team_col=team_col,
+        )
+        totals[i] = scored["total_score"]
+        if scored["has_four_every_week"]:
+            ok_all += 1
+        if scored["has_four_div_cc_sb"]:
+            ok_late += 1
+
+    return {
+        "max_total": float(np.max(totals)) if n_sims else 0.0,
+        "p_four_every_week": float(ok_all / n_sims) if n_sims else 0.0,
+        "p_four_div_cc_sb": float(ok_late / n_sims) if n_sims else 0.0,
+        "q50": float(np.quantile(totals, 0.50)) if n_sims else 0.0,
+        "q80": float(np.quantile(totals, 0.80)) if n_sims else 0.0,
+        "q90": float(np.quantile(totals, 0.90)) if n_sims else 0.0,
+        "q95": float(np.quantile(totals, 0.95)) if n_sims else 0.0,
+    }
+
