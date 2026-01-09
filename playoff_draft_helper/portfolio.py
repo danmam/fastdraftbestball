@@ -615,7 +615,7 @@ return {
     "candidates_scored": shortlist,
 }
 
-    "exposure_players": exp_players,
-    "exposure_teams": exp_teams,
-    "candidates_scored": shortlist,
-}
+        "exposure_players": exp_players,
+        "exposure_teams": exp_teams,
+        "candidates_scored": shortlist,
+    }
