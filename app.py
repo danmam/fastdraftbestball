@@ -61,18 +61,21 @@ if players_fp and win_odds_fp and adp_fp:
     lock_nfc_val = None if lock_nfc == "(auto)" else lock_nfc
     lock_afc_val = None if lock_afc == "(auto)" else lock_afc
 
-    board, meta = compute_board(
-        players_df=players,
-        win_odds_df=win_odds,
-        adp_df=adp,
-        cond_by_champ_nfc=cond_nfc,
-        exp_if_not_champ_nfc=exp_not_nfc,
-        cond_by_champ_afc=cond_afc,
-        exp_if_not_champ_afc=exp_not_afc,
-        drafted_players_in_order=drafted_players,
-        lock_override_nfc=lock_nfc_val,
-        lock_override_afc=lock_afc_val,
-    )
+    board, recommendations, meta = compute_board(
+    players_df=players,
+    win_odds_df=win_odds,
+    adp_df=adp,
+    cond_by_champ_nfc=cond_nfc,
+    exp_if_not_champ_nfc=exp_not_nfc,
+    cond_by_champ_afc=cond_afc,
+    exp_if_not_champ_afc=exp_not_afc,
+    drafted_players_in_order=my_picks,
+    drafted_by_others=other_picks,
+    current_pick=current_pick,
+    next_pick=next_pick,
+    lock_override_nfc=lock_nfc_val,
+    lock_override_afc=lock_afc_val,
+)
 
     st.markdown(f"""
 **Auto locks:** NFC={meta["AutoLock_NFC"]}, AFC={meta["AutoLock_AFC"]}  
@@ -104,3 +107,4 @@ if players_fp and win_odds_fp and adp_fp:
 
 else:
     st.info("Upload the three CSVs to begin (same schemas as your files).")
+
