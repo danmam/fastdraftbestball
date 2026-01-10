@@ -293,7 +293,7 @@ with st.expander("⚙️ Lineup Construction Rules", expanded=False):
     with col10:
         n_workers = st.number_input(
             "Parallel Workers",
-            min_value=1,
+            min_value=0,  # Changed: allow 0 for auto-detect
             max_value=16,
             value=0,
             step=1,
