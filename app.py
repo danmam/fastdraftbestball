@@ -108,34 +108,232 @@ board, recommendations, meta = compute_board(
 # --------------------------------------------------
 st.subheader("🎯 Portfolio Optimizer (10 Entries)")
 
+# Template selector
+st.markdown("##### Quick Start Templates")
+template_col1, template_col2 = st.columns([3, 1])
+
+with template_col1:
+    template = st.selectbox(
+        "Load preset configuration:",
+        ["Custom", "Tournament GPP", "Balanced", "Cash/Low Variance", "Contrarian Chaos"],
+        help="Quick-load common strategy profiles"
+    )
+
+with template_col2:
+    st.markdown("<br>", unsafe_allow_html=True)
+    load_template = st.button("Load Template")
+
+# Template configurations
+if load_template or template != "Custom":
+    if template == "Tournament GPP":
+        st.session_state.template_config = {
+            "min_wc": 3, "min_stack": 2, "max_per_team": 4,
+            "k_dup": 1200.0, "overlap": 0.5, "leverage": 2.5,
+            "max_heavy": 2, "max_any": 5
+        }
+    elif template == "Balanced":
+        st.session_state.template_config = {
+            "min_wc": 2, "min_stack": 2, "max_per_team": 3,
+            "k_dup": 900.0, "overlap": 0.35, "leverage": 2.0,
+            "max_heavy": 3, "max_any": 5
+        }
+    elif template == "Cash/Low Variance":
+        st.session_state.template_config = {
+            "min_wc": 1, "min_stack": 2, "max_per_team": 3,
+            "k_dup": 500.0, "overlap": 0.2, "leverage": 1.5,
+            "max_heavy": 5, "max_any": 7
+        }
+    elif template == "Contrarian Chaos":
+        st.session_state.template_config = {
+            "min_wc": 4, "min_stack": 3, "max_per_team": 4,
+            "k_dup": 1500.0, "overlap": 0.8, "leverage": 3.5,
+            "max_heavy": 1, "max_any": 3
+        }
+
+# Get template config if exists
+if "template_config" not in st.session_state:
+    st.session_state.template_config = {}
+
+tc = st.session_state.template_config
+
+# Basic settings
+st.markdown("##### Generation Settings")
 colA, colB, colC, colD, colE = st.columns(5)
 
 with colA:
     n_candidates = st.number_input(
-        "Candidates", min_value=2000, max_value=100000, value=20000, step=2000
+        "Candidates", min_value=2000, max_value=100000, value=20000, step=2000,
+        help="Number of random lineups to generate before filtering"
     )
 
 with colB:
     shortlist_size = st.number_input(
-        "Shortlist", min_value=50, max_value=2000, value=400, step=50
+        "Shortlist", min_value=50, max_value=2000, value=400, step=50,
+        help="Number of top candidates to simulate in detail"
     )
 
 with colC:
-    k_dup = st.number_input(
-        "Dup penalty k", min_value=0.0, max_value=3000.0, value=900.0, step=50.0
+    n_sims = st.number_input(
+        "Simulations", min_value=100, max_value=10000, value=1000, step=100,
+        help="Number of bracket simulations per lineup"
     )
 
 with colD:
-    overlap_lambda = st.number_input(
-        "Overlap λ", min_value=0.0, max_value=2.0, value=0.35, step=0.05
+    k_dup = st.number_input(
+        "Dup penalty k", min_value=0.0, max_value=3000.0, value=900.0, step=50.0,
+        help="Penalty for duplicate/chalky ownership"
     )
 
 with colE:
-    n_sims = st.number_input(
-        "Simulations", min_value=100, max_value=10000, value=1000, step=100
+    overlap_lambda = st.number_input(
+        "Overlap λ", min_value=0.0, max_value=2.0, value=0.35, step=0.05,
+        help="Player overlap penalty between lineups"
     )
 
+# Lineup construction constraints
+with st.expander("⚙️ Lineup Construction Rules", expanded=False):
+    st.markdown("##### Stack and Team Constraints")
+    
+    col1, col2, col3, col4 = st.columns(4)
+    
+    with col1:
+        min_wc_players = st.number_input(
+            "Min Wild Card Players",
+            min_value=0,
+            max_value=6,
+            value=tc.get("min_wc", 2),
+            step=1,
+            help="Minimum players from Wild Card weekend teams (no bye week)"
+        )
+    
+    with col2:
+        min_stack = st.number_input(
+            "Min Stack Size",
+            min_value=2,
+            max_value=4,
+            value=tc.get("min_stack", 2),
+            step=1,
+            help="Minimum players from any single team in a lineup"
+        )
+    
+    with col3:
+        max_players_per_team = st.number_input(
+            "Max Players Per Team",
+            min_value=2,
+            max_value=6,
+            value=tc.get("max_per_team", 4),
+            step=1,
+            help="Maximum players allowed from any single team"
+        )
+    
+    with col4:
+        leverage_beta = st.number_input(
+            "Leverage Beta",
+            min_value=0.5,
+            max_value=5.0,
+            value=tc.get("leverage", 2.0),
+            step=0.5,
+            help="Higher = more preference for low-ownership lineups"
+        )
+    
+    st.markdown("##### Team-Specific Caps")
+    col5, col6, col7, col8 = st.columns(4)
+    
+    with col5:
+        rams_team = st.text_input(
+            "Cap Team Code",
+            value="LAR",
+            help="Team abbreviation to apply exposure caps (e.g., LAR, PHI)"
+        )
+    
+    with col6:
+        rams_heavy_threshold = st.number_input(
+            "Heavy Stack Threshold",
+            min_value=2,
+            max_value=6,
+            value=3,
+            step=1,
+            help=f"Number of {rams_team} players to be considered 'heavy'"
+        )
+    
+    with col7:
+        max_rams_heavy = st.number_input(
+            "Max Heavy Stacks",
+            min_value=0,
+            max_value=10,
+            value=tc.get("max_heavy", 3),
+            step=1,
+            help=f"Max lineups with {rams_heavy_threshold}+ {rams_team} players"
+        )
+    
+    with col8:
+        max_rams_any = st.number_input(
+            "Max Any Exposure",
+            min_value=0,
+            max_value=10,
+            value=tc.get("max_any", 5),
+            step=1,
+            help=f"Max lineups with any {rams_team} players"
+        )
+    
+    st.markdown("##### Advanced Filters")
+    col9, col10 = st.columns(2)
+    
+    with col9:
+        feasibility_gate = st.number_input(
+            "Feasibility Gate (P4 Div/CC/SB)",
+            min_value=0.0,
+            max_value=1.0,
+            value=0.03,
+            step=0.01,
+            format="%.3f",
+            help="Minimum probability of having 4 players in Div/CC/SB rounds"
+        )
+    
+    with col10:
+        n_workers = st.number_input(
+            "Parallel Workers",
+            min_value=1,
+            max_value=16,
+            value=0,
+            step=1,
+            help="CPU cores for parallel processing (0 = auto-detect)"
+        )
+        n_workers = None if n_workers == 0 else n_workers
+
 bye_teams = {"SEA", "DEN"}
+
+# Validation warnings
+if min_wc_players + (6 - max_players_per_team) > 6:
+    st.warning(f"⚠️ Your constraints may be impossible: Min WC Players ({min_wc_players}) + diversity requirements may exceed 6 players.")
+
+if min_stack > max_players_per_team:
+    st.error(f"❌ Invalid: Min Stack ({min_stack}) cannot be larger than Max Players Per Team ({max_players_per_team})")
+    st.stop()
+
+if max_rams_heavy > max_rams_any:
+    st.warning(f"⚠️ Warning: Max Heavy Stacks ({max_rams_heavy}) should be ≤ Max Any Exposure ({max_rams_any})")
+
+# Display constraint summary
+with st.expander("📋 Current Constraint Summary", expanded=False):
+    st.markdown(f"""
+    **Lineup Construction:**
+    - Each lineup requires **{min_wc_players}-6** Wild Card players
+    - Each lineup requires **≥{min_stack}** players from at least one team
+    - No team can have **>{max_players_per_team}** players in a lineup
+    
+    **Portfolio Diversification:**
+    - Player overlap penalty: **{overlap_lambda}**
+    - Ownership penalty: **{k_dup}**
+    - Leverage weighting: **{leverage_beta}**
+    
+    **{rams_team} Exposure Caps:**
+    - Max lineups with any {rams_team} players: **{max_rams_any}/10**
+    - Max lineups with {rams_heavy_threshold}+ {rams_team} players: **{max_rams_heavy}/10**
+    
+    **Quality Filters:**
+    - Min P(4 players Div/CC/SB): **{feasibility_gate:.1%}**
+    """)
 
 if st.button("Generate optimized 10 entries"):
     team_probs = build_team_round_probs(win_odds, bye_teams=bye_teams)
@@ -172,10 +370,17 @@ if st.button("Generate optimized 10 entries"):
             k_dup=float(k_dup),
             overlap_lambda=float(overlap_lambda),
             rng_seed=1,
-            min_wc_players=2,
-            min_stack=2,
+            min_wc_players=min_wc_players,
+            min_stack=min_stack,
+            max_players_per_team=max_players_per_team,
+            leverage_beta=leverage_beta,
+            feasibility_gate_div_cc_sb=feasibility_gate,
             bye_teams=bye_teams,
-            n_workers=None,  # Auto-detect CPU count
+            rams_team=rams_team,
+            rams_heavy_threshold=rams_heavy_threshold,
+            max_rams_heavy_portfolio=max_rams_heavy,
+            max_rams_any_portfolio=max_rams_any,
+            n_workers=n_workers,
             progress_callback=update_progress,
         )
         
@@ -183,6 +388,24 @@ if st.button("Generate optimized 10 entries"):
         
         # Display results
         st.success(f"✓ Generated 10 optimized lineups using {n_sims} simulations")
+        
+        # Key metrics explanation
+        with st.expander("ℹ️ Understanding the Results", expanded=False):
+            st.markdown("""
+            **Portfolio Summary Columns:**
+            - **MaxTotalSim**: Highest total score across all simulated brackets (ceiling)
+            - **Q95**: 95th percentile score (high-but-realistic outcome)
+            - **P4DivCCSB**: Probability of having 4+ players in Divisional, CC, and SB rounds
+            - **NumWildCard**: Number of Wild Card weekend players in lineup
+            - **MaxStack**: Largest team stack size
+            - **NumRams**: Number of players from the capped team
+            - **MeanOwnership**: Average ownership of players in lineup
+            
+            **Strategy:**
+            - Higher MaxTotalSim = higher ceiling but may be less stable
+            - Higher P4DivCCSB = more likely to "survive" deep into playoffs
+            - Lower MeanOwnership = more contrarian/differentiated
+            """)
         
         st.subheader("📊 Portfolio Summary")
         st.dataframe(
