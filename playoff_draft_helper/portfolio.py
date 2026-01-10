@@ -1,10 +1,23 @@
+# playoff_draft_helper/portfolio.py
+"""
+Portfolio optimization with optimized parallel simulation.
+
+Key changes:
+1. Generate bracket cache once for all lineups
+2. Use parallel simulation for massive speedup
+3. Progress tracking for better UX
+"""
 from __future__ import annotations
 
 import itertools
 import numpy as np
 import pandas as pd
 
-from playoff_draft_helper.sim import build_round_probs, simulate_lineup_many
+from playoff_draft_helper.sim import (
+    build_round_probs,
+    simulate_multiple_lineups_parallel,
+    BracketCache,
+)
 
 BOOSTERS = [2.0, 1.75, 1.5, 1.25, 1.0, 1.0]
 
@@ -313,7 +326,7 @@ def _sample_k_with_leverage(
 
 
 # -----------------------------
-# Portfolio selection (simulation-driven)
+# Portfolio selection (OPTIMIZED simulation-driven)
 # -----------------------------
 def optimize_portfolio_10(
     pool: pd.DataFrame,
@@ -334,12 +347,15 @@ def optimize_portfolio_10(
     rams_heavy_threshold: int = 3,
     max_rams_heavy_portfolio: int = 3,
     max_rams_any_portfolio: int = 5,
+    n_workers: int = None,  # NEW: parallel workers
+    progress_callback = None,  # NEW: for progress updates
 ) -> dict:
     if bye_teams is None:
         bye_teams = {"SEA", "DEN"}
 
-    # Keep development entropy: same rng_seed doesn't mean same lineups every run
-    rng = np.random.default_rng(rng_seed + int(np.random.randint(0, 1_000_000)))
+    # Use proper seeding
+    temp_rng = np.random.default_rng(rng_seed)
+    rng = np.random.default_rng(rng_seed + int(temp_rng.integers(0, 1_000_000)))
 
     pool = (
         pool.sort_values("FastPlayerValue", ascending=False)
@@ -348,9 +364,24 @@ def optimize_portfolio_10(
     )
     idx = pool.set_index("Player")
 
+    # =====================================================
+    # STEP 1: Generate bracket cache ONCE for all lineups
+    # =====================================================
+    if progress_callback:
+        progress_callback("Generating bracket simulations...")
+    
     probs = build_round_probs(win_odds_df)
+    bracket_cache = BracketCache.generate(probs, n_sims, seed=int(rng.integers(1, 1_000_000_000)))
+    
+    print(f"✓ Generated {n_sims} bracket simulations")
+
+    # =====================================================
+    # STEP 2: Generate candidates
+    # =====================================================
+    if progress_callback:
+        progress_callback("Generating candidate lineups...")
+    
     print("STEP 1: Generating candidates...")
-    # 1) Generate candidates (strict WC constraint)
     candidates = generate_candidate_lineups(
         pool=pool,
         n_candidates=n_candidates,
@@ -358,15 +389,16 @@ def optimize_portfolio_10(
         min_wc_players=min_wc_players,
     )
     print(f"STEP 2: {len(candidates)} candidates generated")
+    
     if not candidates:
         raise ValueError("No candidates generated.")
 
-    # 2) Apply additional structural constraint: min stack (>=3 from one team)
+    # Apply structural constraints
     constrained = [c for c in candidates if _passes_constraints(idx, c, min_wc_players, min_stack)]
     if not constrained:
         raise ValueError("No candidates passed constraints (min_wc_players/min_stack).")
 
-    # 3) Shortlist K=200 using leverage-weighted randomness
+    # Leverage-weighted shortlist
     shortlist_lineups = _sample_k_with_leverage(
         rng=rng,
         candidates=constrained,
@@ -375,7 +407,12 @@ def optimize_portfolio_10(
         beta=leverage_beta,
     )
 
-    # 4) FastScore (secondary signal / diagnostics only)
+    # =====================================================
+    # STEP 3: Fast scoring (for metadata only)
+    # =====================================================
+    if progress_callback:
+        progress_callback("Computing fast scores...")
+    
     scored_rows = []
     for lineup in shortlist_lineups:
         lineup_df = idx.loc[lineup].reset_index()
@@ -409,44 +446,58 @@ def optimize_portfolio_10(
         .reset_index(drop=True)
     )
     print("CANDIDATES_SCORED SIZE:", len(candidates_scored))
-    # 5) Week-by-week simulation on shortlist
-    sim_rows = [] 
-    n_lineups = len(candidates_scored) 
+
+    # =====================================================
+    # STEP 4: OPTIMIZED PARALLEL SIMULATION
+    # =====================================================
+    if progress_callback:
+        progress_callback(f"Simulating {len(candidates_scored)} lineups in parallel...")
     
-    for i, (_, r) in enumerate(candidates_scored.iterrows()): 
-        if i % 5 == 0: 
-            print(f"[SIM] Starting lineup {i+1}/{n_lineups}")
-        players = list(r["Players"])
-        lineup_df = idx.loc[players].reset_index()
+    print(f"[SIM] Starting parallel simulation of {len(candidates_scored)} lineups...")
+    
+    # Prepare lineup data
+    lineups_to_sim = [
+        (i, idx.loc[list(row["Players"])].reset_index())
+        for i, (_, row) in enumerate(candidates_scored.iterrows())
+    ]
+    
+    # Run parallel simulation (THIS IS THE BIG SPEEDUP)
+    sim_results = simulate_multiple_lineups_parallel(
+        lineups=lineups_to_sim,
+        bracket_cache=bracket_cache,
+        n_workers=n_workers,
+    )
+    
+    print(f"[SIM] ✓ Completed all simulations")
+    
+    # Merge results back
+    sim_df = pd.DataFrame([
+        {
+            "Players": tuple(r["players"]),
+            "MaxTotalSim": r["max_total"],
+            "P4EveryWeek": r["p_four_every_week"],
+            "P4DivCCSB": r["p_four_div_cc_sb"],
+            "Q90": r["q90"],
+            "Q95": r["q95"],
+        }
+        for r in sim_results
+    ])
 
-        sim = simulate_lineup_many(
-            lineup_df=lineup_df,
-            probs=probs,
-            n_sims=n_sims,
-            seed=int(rng.integers(1, 1_000_000_000)),
-        )
-        print(f"[SIM] Finished lineup {i+1}/{n_lineups}")
-        sim_rows.append(
-            {
-                "Players": r["Players"],
-                "MaxTotalSim": float(sim["max_total"]),
-                "P4EveryWeek": float(sim["p_four_every_week"]),
-                "P4DivCCSB": float(sim["p_four_div_cc_sb"]),
-                "Q90": float(sim["q90"]),
-                "Q95": float(sim["q95"]),
-            }
-        )
-
-    sim_df = pd.DataFrame(sim_rows)
     scored = candidates_scored.merge(sim_df, on="Players", how="left")
 
+    # =====================================================
+    # STEP 5: Portfolio selection with constraints
+    # =====================================================
+    if progress_callback:
+        progress_callback("Selecting optimal portfolio...")
+    
     feasible = scored.loc[scored["P4DivCCSB"] >= feasibility_gate_div_cc_sb].copy()
     if feasible.empty:
         feasible = scored.copy()
 
     feasible = feasible.sort_values(["MaxTotalSim", "Q95", "EWFast"], ascending=False).reset_index(drop=True)
 
-    # 6) Greedy portfolio selection: simulated ceiling primary, overlap penalty, Rams caps
+    # Greedy selection with overlap penalty and Rams caps
     selected = []
     selected_sets = []
     rams_any_selected = 0
@@ -489,7 +540,9 @@ def optimize_portfolio_10(
 
     selected_rows = [r for _, r in sorted(selected, key=lambda x: x[0], reverse=True)[:10]]
 
-    # 7) Build display lineups + exposures
+    # =====================================================
+    # STEP 6: Build final output
+    # =====================================================
     portfolio_lineups = []
     portfolio_summary_rows = []
 
@@ -525,13 +578,14 @@ def optimize_portfolio_10(
 
     portfolio_summary = pd.DataFrame(portfolio_summary_rows)
 
-    all_players = list(itertools.chain.from_iterable(df["Player"] for df in portfolio_lineups))
-    exp_players = pd.Series(all_players).value_counts().rename_axis("Player").reset_index(name="Count")
+    # Exposures
+    all_players = pd.concat([df["Player"] for df in portfolio_lineups], ignore_index=True)
+    exp_players = all_players.value_counts().rename_axis("Player").reset_index(name="Count")
     exp_players["Exposure"] = exp_players["Count"] / 10.0
     exp_players = exp_players.merge(pool[["Player", "Team", "OwnershipFrac"]], on="Player", how="left")
 
-    all_teams = list(itertools.chain.from_iterable(df["Team"] for df in portfolio_lineups))
-    exp_teams = pd.Series(all_teams).value_counts().rename_axis("Team").reset_index(name="Count")
+    all_teams = pd.concat([df["Team"] for df in portfolio_lineups], ignore_index=True)
+    exp_teams = all_teams.value_counts().rename_axis("Team").reset_index(name="Count")
     exp_teams["Exposure"] = exp_teams["Count"] / (10.0 * 6.0)
 
     return {
