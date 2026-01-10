@@ -409,7 +409,187 @@ if st.button("Generate optimized 10 entries"):
             - Lower MeanOwnership = more contrarian/differentiated
             """)
         
-        st.subheader("📊 Portfolio Summary")
+        # ============================================
+        # ALL SIMULATED CANDIDATES TABLE
+        # ============================================
+        st.subheader("🔍 All Simulated Candidates")
+        st.markdown(f"**{len(result['candidates_scored'])} lineups** fully simulated and ranked by MaxTotalSim")
+        
+        # Controls for candidate table
+        col_filter1, col_filter2, col_filter3, col_filter4 = st.columns(4)
+        
+        with col_filter1:
+            max_display = st.number_input(
+                "Show Top N Candidates",
+                min_value=10,
+                max_value=len(result['candidates_scored']),
+                value=min(100, len(result['candidates_scored'])),
+                step=10,
+                help="Number of top candidates to display"
+            )
+        
+        with col_filter2:
+            min_feasibility = st.slider(
+                "Min P4 Div/CC/SB",
+                min_value=0.0,
+                max_value=0.5,
+                value=0.0,
+                step=0.01,
+                format="%.2f",
+                help="Filter to lineups with at least this probability"
+            )
+        
+        with col_filter3:
+            sort_by = st.selectbox(
+                "Sort By",
+                ["MaxTotalSim", "Q95", "Q90", "P4DivCCSB", "MeanOwnership", "EWFast"],
+                index=0,
+                help="Primary sorting metric"
+            )
+        
+        with col_filter4:
+            show_players = st.checkbox(
+                "Show Player Names",
+                value=False,
+                help="Include full player names (wider table)"
+            )
+        
+        # Filter and sort candidates
+        filtered_candidates = result['candidates_scored'].copy()
+        if min_feasibility > 0:
+            filtered_candidates = filtered_candidates[filtered_candidates['P4DivCCSB'] >= min_feasibility]
+        
+        filtered_candidates = filtered_candidates.sort_values(sort_by, ascending=False).head(max_display)
+        
+        # Expand player tuples to comma-separated strings for display
+        display_df = filtered_candidates.copy()
+        display_df['Lineup_ID'] = range(1, len(display_df) + 1)
+        display_df['Players'] = display_df['Players'].apply(lambda x: ', '.join(x))
+        
+        # Select columns to display based on user preference
+        if show_players:
+            display_columns = [
+                'Lineup_ID', 'MaxTotalSim', 'Q95', 'Q90', 'P4DivCCSB',
+                'NumWildCard', 'MaxStack', 'MeanOwnership', 'Players'
+            ]
+        else:
+            display_columns = [
+                'Lineup_ID', 'MaxTotalSim', 'Q95', 'Q90', 'P4DivCCSB', 'P4EveryWeek',
+                'NumWildCard', 'MaxStack', 'NumTeams', 'MeanOwnership', 'EWFast'
+            ]
+        
+        st.dataframe(
+            display_df[display_columns],
+            use_container_width=True,
+            height=600,
+            column_config={
+                "Lineup_ID": st.column_config.NumberColumn("ID", format="%d"),
+                "MaxTotalSim": st.column_config.NumberColumn("Max Total", format="%.1f"),
+                "Q95": st.column_config.NumberColumn("Q95", format="%.1f"),
+                "Q90": st.column_config.NumberColumn("Q90", format="%.1f"),
+                "P4DivCCSB": st.column_config.NumberColumn("P4 Div/CC/SB", format="%.3f"),
+                "P4EveryWeek": st.column_config.NumberColumn("P4 Every Week", format="%.3f"),
+                "NumWildCard": st.column_config.NumberColumn("WC Players", format="%d"),
+                "MaxStack": st.column_config.NumberColumn("Max Stack", format="%d"),
+                "NumTeams": st.column_config.NumberColumn("# Teams", format="%d"),
+                "MeanOwnership": st.column_config.NumberColumn("Avg Own", format="%.2f"),
+                "EWFast": st.column_config.NumberColumn("EV Fast", format="%.1f"),
+                "Players": st.column_config.TextColumn("Lineup", width="large"),
+            }
+        )
+        
+        # Add info about finding specific lineups
+        st.info("💡 **Tip:** Use Ctrl+F (or Cmd+F on Mac) in the table above to search for specific players. You can also sort by clicking column headers.")
+        
+        # Download button for full candidate list
+        csv = filtered_candidates.to_csv(index=False)
+        st.download_button(
+            label=f"📥 Download Top {len(filtered_candidates)} Candidates as CSV",
+            data=csv,
+            file_name=f"playoff_candidates_top_{len(filtered_candidates)}.csv",
+            mime="text/csv",
+        )
+        
+        # Summary stats
+        st.markdown("##### Candidate Pool Statistics")
+        stat_col1, stat_col2, stat_col3, stat_col4, stat_col5 = st.columns(5)
+        
+        with stat_col1:
+            st.metric("Total Simulated", len(result['candidates_scored']))
+        with stat_col2:
+            st.metric("Shown After Filters", len(filtered_candidates))
+        with stat_col3:
+            st.metric("Pass Feasibility Gate", 
+                     len(result['candidates_scored'][result['candidates_scored']['P4DivCCSB'] >= feasibility_gate]))
+        with stat_col4:
+            st.metric("Avg MaxTotal", f"{filtered_candidates['MaxTotalSim'].mean():.1f}")
+        with stat_col5:
+            st.metric("Avg P4 Div/CC/SB", f"{filtered_candidates['P4DivCCSB'].mean():.3f}")
+        
+        st.markdown("---")
+        
+        # ============================================
+        # LINEUP DETAIL VIEWER
+        # ============================================
+        with st.expander("🔎 View Detailed Lineup Information", expanded=False):
+            st.markdown("Enter a Lineup ID from the table above to see full player details and team breakdown.")
+            
+            detail_id = st.number_input(
+                "Lineup ID to View",
+                min_value=1,
+                max_value=len(filtered_candidates),
+                value=1,
+                step=1,
+                help="Enter the ID from the first column of the table above"
+            )
+            
+            if detail_id <= len(filtered_candidates):
+                # Get the lineup
+                detail_row = filtered_candidates.iloc[detail_id - 1]
+                player_names = list(detail_row['Players']) if isinstance(detail_row['Players'], tuple) else detail_row['Players'].split(', ')
+                
+                # Get player details
+                detail_lineup_df = pool[pool['Player'].isin(player_names)].copy()
+                detail_lineup_df = detail_lineup_df.sort_values('FastPlayerValue', ascending=False)
+                
+                # Display metrics
+                col_d1, col_d2, col_d3, col_d4 = st.columns(4)
+                with col_d1:
+                    st.metric("MaxTotalSim", f"{detail_row['MaxTotalSim']:.1f}")
+                with col_d2:
+                    st.metric("Q95", f"{detail_row['Q95']:.1f}")
+                with col_d3:
+                    st.metric("P4 Div/CC/SB", f"{detail_row['P4DivCCSB']:.3f}")
+                with col_d4:
+                    st.metric("Avg Ownership", f"{detail_row['MeanOwnership']:.2f}")
+                
+                # Player details
+                st.markdown("**Players in Lineup:**")
+                st.dataframe(
+                    detail_lineup_df[['Player', 'Team', 'FastPlayerValue', 'OwnershipFrac']],
+                    use_container_width=True,
+                    hide_index=True,
+                    column_config={
+                        "Player": st.column_config.TextColumn("Player"),
+                        "Team": st.column_config.TextColumn("Team"),
+                        "FastPlayerValue": st.column_config.NumberColumn("Value", format="%.1f"),
+                        "OwnershipFrac": st.column_config.NumberColumn("Ownership", format="%.1%"),
+                    }
+                )
+                
+                # Team breakdown
+                team_counts = detail_lineup_df['Team'].value_counts()
+                st.markdown("**Team Breakdown:**")
+                for team, count in team_counts.items():
+                    players_from_team = detail_lineup_df[detail_lineup_df['Team'] == team]['Player'].tolist()
+                    st.write(f"**{team}** ({count} players): {', '.join(players_from_team)}")
+        
+        st.markdown("---")
+        
+        # ============================================
+        # SELECTED PORTFOLIO (10 LINEUPS)
+        # ============================================
+        st.subheader("📊 Selected Portfolio (10 Lineups)")
         st.dataframe(
             result["portfolio_summary"][[
                 "Entry", "MaxTotalSim", "Q95", "P4DivCCSB", 
@@ -417,6 +597,15 @@ if st.button("Generate optimized 10 entries"):
             ]],
             use_container_width=True,
             height=280,
+        )
+        
+        # Download button for portfolio
+        portfolio_csv = result["portfolio_summary"].to_csv(index=False)
+        st.download_button(
+            label="📥 Download Portfolio Summary as CSV",
+            data=portfolio_csv,
+            file_name="playoff_portfolio_summary.csv",
+            mime="text/csv",
         )
         
         st.subheader("👥 Player Exposures")
@@ -436,32 +625,47 @@ if st.button("Generate optimized 10 entries"):
         st.subheader("📋 Final 10 Lineups")
         
         for i, lineup_df in enumerate(result["portfolio_lineups"], start=1):
-            with st.expander(f"Lineup {i} - Max: {result['portfolio_summary'].iloc[i-1]['MaxTotalSim']:.1f}", expanded=(i==1)):
+            with st.expander(f"Lineup {i} - Max: {result['portfolio_summary'].iloc[i-1]['MaxTotalSim']:.1f}, Q95: {result['portfolio_summary'].iloc[i-1]['Q95']:.1f}", expanded=(i==1)):
                 st.dataframe(
                     lineup_df[["Player", "Team", "FastPlayerValue", "Booster", "BoostedValue"]],
                     use_container_width=True,
                     hide_index=True,
                 )
         
-        # Analysis section
-        st.subheader("🔍 Candidate Analysis")
-        
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            st.markdown("**Top 50 Candidates by Simulated Max**")
-            st.dataframe(
-                result["candidates_scored"][["MaxTotalSim", "Q95", "P4DivCCSB", "NumWildCard", "MaxStack"]].head(50),
-                use_container_width=True,
-                height=300,
-            )
-        
-        with col2:
-            st.markdown("**Score Distribution**")
-            st.line_chart(
-                result["candidates_scored"]["MaxTotalSim"].head(100),
-                height=280,
-            )
+        # Analysis section - now collapsed by default since we have the big table above
+        with st.expander("📈 Candidate Pool Distributions", expanded=False):
+            st.markdown("Visual analysis of all simulated candidates")
+            
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                st.markdown("**MaxTotalSim Distribution**")
+                st.line_chart(
+                    result["candidates_scored"]["MaxTotalSim"].head(200),
+                    height=250,
+                )
+                
+                st.markdown("**Ownership vs. Ceiling**")
+                scatter_data = result["candidates_scored"][["MeanOwnership", "MaxTotalSim"]].head(200)
+                st.scatter_chart(
+                    scatter_data,
+                    x="MeanOwnership",
+                    y="MaxTotalSim",
+                    height=250,
+                )
+            
+            with col2:
+                st.markdown("**P4 Div/CC/SB Distribution**")
+                st.bar_chart(
+                    result["candidates_scored"]["P4DivCCSB"].head(200).value_counts().sort_index(),
+                    height=250,
+                )
+                
+                st.markdown("**Team Stack Size Distribution**")
+                st.bar_chart(
+                    result["candidates_scored"]["MaxStack"].value_counts().sort_index(),
+                    height=250,
+                )
         
     except Exception as e:
         st.error(f"Optimization failed: {str(e)}")
