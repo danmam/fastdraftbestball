@@ -356,10 +356,11 @@ if st.button("Generate optimized 10 entries"):
     
     try:
         # Update progress at start
-        progress_bar.progress(10, text="Building player pool...")
+        progress_bar.progress(5, text="🎲 Pre-generating bracket simulations...")
+        status_text.info(f"Generating {n_sims} NFL playoff bracket simulations (will be reused for all lineups)")
         
         # Run optimized portfolio generation
-        progress_bar.progress(20, text="Starting optimization...")
+        progress_bar.progress(10, text="🎯 Starting portfolio optimization...")
         
         result = optimize_portfolio_10(
             pool=pool,
@@ -386,8 +387,9 @@ if st.button("Generate optimized 10 entries"):
         
         progress_bar.progress(100, text="✓ Optimization complete!")
         
-        # Display results
-        st.success(f"✓ Generated 10 optimized lineups using {n_sims} simulations")
+        # Display results with performance info
+        st.success(f"✓ Generated 10 optimized lineups")
+        st.info(f"⚡ Performance: Used {n_sims} bracket simulations (cached and reused across {shortlist_size} candidate lineups)")
         
         # Key metrics explanation
         with st.expander("ℹ️ Understanding the Results", expanded=False):
