@@ -94,7 +94,7 @@ board, recommendations, meta = compute_board(
     cond_by_champ_nfc=cond_nfc,
     exp_if_not_champ_nfc=exp_not_nfc,
     cond_by_champ_afc=cond_afc,
-    exp_if_not_champ_afc=exp_not_afc,
+    exp_if_not_afc=exp_not_afc,
     drafted_players_in_order=st.session_state.drafted_by_you,
     drafted_by_others=st.session_state.drafted_by_others,
     current_pick=current_pick,
@@ -108,7 +108,7 @@ board, recommendations, meta = compute_board(
 # --------------------------------------------------
 st.subheader("🎯 Portfolio Optimizer (10 Entries)")
 
-colA, colB, colC, colD = st.columns(4)
+colA, colB, colC, colD, colE = st.columns(5)
 
 with colA:
     n_candidates = st.number_input(
@@ -130,6 +130,11 @@ with colD:
         "Overlap λ", min_value=0.0, max_value=2.0, value=0.35, step=0.05
     )
 
+with colE:
+    n_sims = st.number_input(
+        "Simulations", min_value=100, max_value=10000, value=1000, step=100
+    )
+
 bye_teams = {"SEA", "DEN"}
 
 if st.button("Generate optimized 10 entries"):
@@ -144,93 +149,112 @@ if st.button("Generate optimized 10 entries"):
         bye_teams=bye_teams,
     )
 
-    # ==========================================
-    # ⚡ DEBUG: FAST UNCONSTRAINED LINEUPS
-    # ==========================================
-    if st.checkbox("⚡ DEBUG: Generate unconstrained lineups (fast)"):
-        rng = np.random.default_rng(1)
-        players_list = pool["Player"].tolist()
-
-        st.subheader("⚡ DEBUG Lineups (No Constraints, No Simulation)")
-
-        for i in range(10):
-            lineup = rng.choice(players_list, size=6, replace=False).tolist()
-            st.markdown(f"### Debug Lineup {i+1}")
-            st.write(lineup)
-
-        st.stop()
-
-    # ==========================================
-    # REAL OPTIMIZER (HEAVY)
-    # ==========================================
-    result = optimize_portfolio_10(
-        pool=pool,
-        win_odds_df=win_odds,
-        n_candidates=3000,
-        k_shortlist= 50,
-        n_sims= 1000,
-        k_dup=float(k_dup),
-        overlap_lambda=float(overlap_lambda),
-        rng_seed=1,
-        min_wc_players=2,
-        min_stack=2,
-        bye_teams=bye_teams,
-    )
-
-
-    st.subheader("DEBUG: Rams caps in selected portfolio")
-    summary = result["portfolio_summary"].copy()
-    st.write("Lineups with any LAR:", int((summary["NumRams"] > 0).sum()))
-    st.write("Lineups with >=3 LAR:", int((summary["NumRams"] >= 3).sum()))
-    st.subheader("Final 10 Lineups")
-
-    for i, lineup_df in enumerate(result["portfolio_lineups"], start=1):
-        st.markdown(f"### Lineup {i}")
-        st.dataframe(
-            lineup_df[["Player", "Team", "FastPlayerValue", "Booster"]],
-            use_container_width=True,
-            hide_index=True,
+    # Progress tracking
+    progress_bar = st.progress(0, text="Initializing optimization...")
+    status_text = st.empty()
+    
+    def update_progress(message):
+        status_text.text(message)
+    
+    try:
+        # Update progress at start
+        progress_bar.progress(10, text="Building player pool...")
+        
+        # Run optimized portfolio generation
+        progress_bar.progress(20, text="Starting optimization...")
+        
+        result = optimize_portfolio_10(
+            pool=pool,
+            win_odds_df=win_odds,
+            n_candidates=n_candidates,
+            k_shortlist=shortlist_size,
+            n_sims=n_sims,
+            k_dup=float(k_dup),
+            overlap_lambda=float(overlap_lambda),
+            rng_seed=1,
+            min_wc_players=2,
+            min_stack=2,
+            bye_teams=bye_teams,
+            n_workers=None,  # Auto-detect CPU count
+            progress_callback=update_progress,
         )
-
-    # =============================
-    # Screened set inspection
-    # =============================
-    screened = result["candidates_scored"]
-
-    st.subheader("🔍 Screened Lineups (Top 200)")
-    st.dataframe(
-        screened.head(200),
-        use_container_width=True,
-        height=500,
-    )
-
-    st.subheader("📉 EWFast decay (Top 200)")
-    st.line_chart(screened["EWFast"].head(200))
-
-    teams = (
-        screened["Players"]
-        .apply(lambda ps: pd.Series(ps))
-        .stack()
-        .map(players.set_index("Player")["Team"])
-    )
-
-    team_counts = teams.value_counts().reset_index()
-    team_counts.columns = ["Team", "Appearances"]
-
-    st.subheader("🏈 Team frequency in screened set")
-    st.dataframe(team_counts.head(10), use_container_width=True)
-
-    #st.session_state["portfolio_result"] = result
-    #st.rerun()
+        
+        progress_bar.progress(100, text="✓ Optimization complete!")
+        
+        # Display results
+        st.success(f"✓ Generated 10 optimized lineups using {n_sims} simulations")
+        
+        st.subheader("📊 Portfolio Summary")
+        st.dataframe(
+            result["portfolio_summary"][[
+                "Entry", "MaxTotalSim", "Q95", "P4DivCCSB", 
+                "NumWildCard", "MaxStack", "NumRams", "MeanOwnership"
+            ]],
+            use_container_width=True,
+            height=280,
+        )
+        
+        st.subheader("👥 Player Exposures")
+        st.dataframe(
+            result["exposure_players"].head(20),
+            use_container_width=True,
+            height=300,
+        )
+        
+        st.subheader("🏈 Team Exposures")
+        st.dataframe(
+            result["exposure_teams"],
+            use_container_width=True,
+            height=220,
+        )
+        
+        st.subheader("📋 Final 10 Lineups")
+        
+        for i, lineup_df in enumerate(result["portfolio_lineups"], start=1):
+            with st.expander(f"Lineup {i} - Max: {result['portfolio_summary'].iloc[i-1]['MaxTotalSim']:.1f}", expanded=(i==1)):
+                st.dataframe(
+                    lineup_df[["Player", "Team", "FastPlayerValue", "Booster", "BoostedValue"]],
+                    use_container_width=True,
+                    hide_index=True,
+                )
+        
+        # Analysis section
+        st.subheader("🔍 Candidate Analysis")
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.markdown("**Top 50 Candidates by Simulated Max**")
+            st.dataframe(
+                result["candidates_scored"][["MaxTotalSim", "Q95", "P4DivCCSB", "NumWildCard", "MaxStack"]].head(50),
+                use_container_width=True,
+                height=300,
+            )
+        
+        with col2:
+            st.markdown("**Score Distribution**")
+            st.line_chart(
+                result["candidates_scored"]["MaxTotalSim"].head(100),
+                height=280,
+            )
+        
+    except Exception as e:
+        st.error(f"Optimization failed: {str(e)}")
+        import traceback
+        st.code(traceback.format_exc())
+    
+    finally:
+        progress_bar.empty()
+        status_text.empty()
 
 
 # --------------------------------------------------
-# Results
+# Results (if stored in session state from previous runs)
 # --------------------------------------------------
 if "portfolio_result" in st.session_state:
     result = st.session_state["portfolio_result"]
 
-    st.markdown("### Portfolio summary")
+    st.markdown("### 💾 Saved Portfolio")
     st.dataframe(result["portfolio_summary"], use_container_width=True, height=260)
 
     st.markdown("### Player exposures (10 entries)")
@@ -337,18 +361,3 @@ with st.expander("📊 Full Draft Board"):
         height=500,
         use_container_width=True,
     )
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
