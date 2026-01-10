@@ -245,8 +245,28 @@ def generate_candidate_lineups(
         picks = rng.choice(df["Player"].values, size=k, replace=False, p=w)
         return list(picks)
 
-    shapes = [[3, 3], [3, 2, 1], [4, 2]]
-    shape_weights = np.array([0.35, 0.40, 0.25])
+    # Generate valid stack shapes based on max_players_per_team constraint
+    shapes = []
+    shape_weights_list = []
+    
+    if max_players_per_team >= 4:
+        shapes.append([4, 2])
+        shape_weights_list.append(0.25)
+    
+    if max_players_per_team >= 3:
+        shapes.append([3, 3])
+        shape_weights_list.append(0.35)
+        shapes.append([3, 2, 1])
+        shape_weights_list.append(0.40)
+    
+    # Fallback if constraints are very tight
+    if not shapes:
+        shapes = [[2, 2, 2]]
+        shape_weights_list = [1.0]
+    
+    # Normalize weights
+    shape_weights = np.array(shape_weights_list)
+    shape_weights = shape_weights / shape_weights.sum()
 
     candidates: list[list[str]] = []
     attempts = 0
@@ -340,6 +360,7 @@ def optimize_portfolio_10(
     rng_seed: int = 1,
     min_wc_players: int = 3,
     min_stack: int = 2,
+    max_players_per_team: int = 4,  # NEW: now user-configurable
     leverage_beta: float = 2.0,
     feasibility_gate_div_cc_sb: float = 0.03,
     bye_teams: set[str] | None = None,
@@ -387,6 +408,7 @@ def optimize_portfolio_10(
         n_candidates=n_candidates,
         rng=rng,
         min_wc_players=min_wc_players,
+        max_players_per_team=max_players_per_team,  # Pass user setting
     )
     print(f"STEP 2: {len(candidates)} candidates generated")
     
